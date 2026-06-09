@@ -637,7 +637,8 @@ function autoSchedule(){
     ps[s.id] = {
       nStreak   : pv==='N' ? 1 : 0,
       restNeeded: pv==='N' ? 1 : 0,
-      lastJuhuDay: -7
+      lastJuhuDay: -7,
+      workCount : 0   // 누적 근무일수 (D/E/N 합계) — 공평 배분용
     };
   });
 
@@ -678,7 +679,7 @@ function autoSchedule(){
 
     // ③ N 배정: inNStreak(연속 우선) → freeStaff 순
     // N→D 불가: inNStreak인 사람은 이미 전날 N이므로 D배정 불가 (자동 보장)
-    const nPool=groupBalancedShuffle([...inNStreak,...freeStaff]);
+    const nPool=groupBalancedShuffle([...inNStreak,...freeStaff],ps);
     for(const s of nPool){
       if(cnt.N>=minStaff.N) break;
       if(ps[s.id].nStreak>=3) continue; // 이미 처리됨이나 안전 체크
@@ -698,7 +699,7 @@ function autoSchedule(){
     }
 
     // ⑤ D 배정: freeStaff 중 미배정자 (N→D 불가이므로 inNStreak 제외)
-    const dPool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)));
+    const dPool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)),ps);
     for(const s of dPool){
       if(cnt.D>=minStaff.D) break;
       sched[s.id][d]='D';
@@ -707,7 +708,7 @@ function autoSchedule(){
     }
 
     // ⑥ E 배정: freeStaff 중 미배정자
-    const ePool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)));
+    const ePool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)),ps);
     for(const s of ePool){
       if(cnt.E>=minStaff.E) break;
       sched[s.id][d]='E';
@@ -738,9 +739,10 @@ function autoSchedule(){
       const sh=sched[id][d];
       if(sh==='N'){
         p.nStreak++;
-        // 연속 N 진행 중: restNeeded는 streak 종료 시 설정
+        p.workCount++;
       } else if(sh==='D'||sh==='E'||sh==='중'){
         p.nStreak=0;
+        p.workCount++;
         // restNeeded는 이미 0 (freeStaff만 D/E 배정 가능)
       } else {
         // 휴무 (OFF/주/VAC/법/생휴/수면/병가)
@@ -760,31 +762,31 @@ function dateToDayIdx(dateStr){
   return Math.round((target-start)/(1000*60*60*24));
 }
 
-function groupBalancedShuffle(staffList){
-  // Group by group number, then interleave
-  const groups={};
-  staffList.forEach(s=>{
-    if(!groups[s.group]) groups[s.group]=[];
-    groups[s.group].push(s);
-  });
-  // Shuffle each group
-  Object.values(groups).forEach(g=>{
-    for(let i=g.length-1;i>0;i--){
-      const j=Math.floor(Math.random()*(i+1));
-      [g[i],g[j]]=[g[j],g[i]];
-    }
-  });
-  // Interleave groups
-  const keys=Object.keys(groups).sort();
-  const result=[];
-  let added=true;
-  while(added){
-    added=false;
-    keys.forEach(k=>{
-      if(groups[k].length){result.push(groups[k].shift());added=true;}
+function groupBalancedShuffle(staffList, psRef){
+  // ─── 공평 배분 정렬 ───────────────────────────────────────────
+  // 1) 먼저 랜덤 셔플 (동일 누적 근무자 사이의 무작위성 확보)
+  const arr=[...staffList];
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  // 2) 그룹 순서 맵 (1그룹→0, 2그룹→1, ...)
+  const groupOrder={};
+  [...new Set(arr.map(s=>s.group))].sort().forEach((g,i)=>{ groupOrder[g]=i; });
+  const numGroups=Object.keys(groupOrder).length||1;
+
+  // 3) 누적 근무수 오름차순 정렬 → 동률이면 그룹 라운드로빈 tiebreak
+  //    psRef 없이 호출될 경우(구형 경로)엔 그냥 랜덤 순서 그대로
+  if(psRef){
+    arr.sort((a,b)=>{
+      const wa=psRef[a.id]?psRef[a.id].workCount:0;
+      const wb=psRef[b.id]?psRef[b.id].workCount:0;
+      if(wa!==wb) return wa-wb;
+      // 동률: 그룹 인덱스로 라운드로빈 효과
+      return (groupOrder[a.group]||0)-(groupOrder[b.group]||0);
     });
   }
-  return result;
+  return arr;
 }
 
 function clearSchedule(){
