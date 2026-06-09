@@ -127,6 +127,14 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 /* ── EXPORT ── */
 .export-preview{background:#f8fafc;border-radius:8px;padding:12px;font-size:12px;color:#475569;line-height:1.8}
 
+/* ── HISTORY ── */
+.hist-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;margin-bottom:8px;background:#fafafa;transition:.15s}
+.hist-item:hover{border-color:#3b82f6;background:#f0f7ff}
+.hist-info{flex:1;min-width:0}
+.hist-label{font-weight:700;font-size:13px;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hist-meta{font-size:11px;color:#94a3b8;margin-top:2px}
+.hist-empty{text-align:center;color:#94a3b8;font-size:13px;padding:24px 0}
+
 /* ── AUTH OVERLAY ── */
 #auth-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#0f172a,#1e3a8a,#1e40af);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px}
 .auth-box{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 24px 80px rgba(0,0,0,.4);text-align:center}
@@ -277,15 +285,11 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
     <div>
       <div class="card">
         <div class="card-title">📅 근무 기간</div>
-        <div class="field-group"><label>시작일</label><input type="date" id="inp-start" value="2024-09-15" onchange="updatePeriod()"></div>
-        <div class="field-group"><label>기간 (일수)</label>
-          <select id="inp-days" onchange="updatePeriod()">
-            <option value="28">28일 (4주)</option>
-            <option value="29">29일</option>
-            <option value="30">30일</option>
-            <option value="31">31일</option>
-          </select>
+        <div class="form-row" style="gap:12px">
+          <div class="field"><label>시작일</label><input type="date" id="inp-start" value="2024-09-01" onchange="updatePeriod()"></div>
+          <div class="field"><label>종료일</label><input type="date" id="inp-end"  value="2024-09-28" onchange="updatePeriod()"></div>
         </div>
+        <div id="days-calc-info" style="font-size:12px;color:#3b82f6;margin-bottom:10px;font-weight:600"></div>
         <div class="field-group"><label>하루 최소 인원</label>
           <div class="form-row">
             <div class="field"><label style="color:#1d4ed8">D (주간)</label><input type="number" id="min-D" value="6" min="1"></div>
@@ -312,6 +316,14 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
         </div>
         <div class="holi-list" id="holi-list" style="margin-top:10px"></div>
       </div>
+    </div>
+    <div>
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>📂 저장된 근무표</span>
+        <button class="btn btn-blue" style="padding:4px 12px;font-size:12px" onclick="saveSnapshot()">💾 현재 근무표 저장</button>
+      </div>
+      <div id="history-list" style="min-height:60px"></div>
     </div>
     <div class="card">
       <div class="card-title">🏖️ 직원별 휴가/특수근무 입력</div>
@@ -340,6 +352,7 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
       </div>
       <div id="leave-list" class="leave-list"></div>
     </div>
+    </div><!-- end right col -->
   </div>
 </div>
 
@@ -497,7 +510,7 @@ function showTab(name){
   const target=document.getElementById(btnId);
   if(target) target.classList.add('active');
   if(name==='schedule') renderScheduleGrid();
-  if(name==='period'){ updatePeriodSummary(); renderLeaveList(); updateLeaveStaffSelect(); }
+  if(name==='period'){ updatePeriodSummary(); renderLeaveList(); updateLeaveStaffSelect(); renderHistoryList(); }
   if(name==='export') renderExportSummary();
   if(name==='accounts') renderUserMgmt();
 }
@@ -608,18 +621,33 @@ function updateGroupStats(){
 //  PERIOD & HOLIDAYS
 // ═══════════════════════════════════════════════════════════════════
 function updatePeriod(){
-  state.period.start=document.getElementById('inp-start').value;
-  state.period.days=parseInt(document.getElementById('inp-days').value);
+  const startVal = document.getElementById('inp-start').value;
+  const endVal   = document.getElementById('inp-end').value;
+  if(!startVal || !endVal) return;
+
+  const days = Math.round((new Date(endVal+'T00:00:00') - new Date(startVal+'T00:00:00')) / 86400000) + 1;
+  if(days < 1){ toast('종료일이 시작일보다 빠릅니다'); return; }
+  if(days > 62){ toast('최대 62일까지 설정 가능합니다'); return; }
+
+  state.period.start = startVal;
+  state.period.end   = endVal;
+  state.period.days  = days;
   state.minStaff.D=parseInt(document.getElementById('min-D').value)||6;
   state.minStaff.E=parseInt(document.getElementById('min-E').value)||7;
   state.minStaff.N=parseInt(document.getElementById('min-N').value)||6;
+
+  // 일수 안내
+  const w=Math.floor(days/7), d=days%7;
+  document.getElementById('days-calc-info').textContent =
+    `📆 총 ${days}일 (${w}주 ${d>0?d+'일':'정확히 '+w+'주'})`;
+
   // resize schedule arrays
   state.staff.forEach(s=>{
     const cur=state.schedule[s.id]||[];
-    if(cur.length<state.period.days){
-      state.schedule[s.id]=[...cur,...new Array(state.period.days-cur.length).fill(null)];
+    if(cur.length<days){
+      state.schedule[s.id]=[...cur,...new Array(days-cur.length).fill(null)];
     } else {
-      state.schedule[s.id]=cur.slice(0,state.period.days);
+      state.schedule[s.id]=cur.slice(0,days);
     }
   });
   updatePeriodSummary();saveState(true);
@@ -627,9 +655,13 @@ function updatePeriod(){
 function updatePeriodSummary(){
   const {start,days}=state.period;
   const end=addDays(start,days-1);
+  const w=Math.floor(days/7), d=days%7;
   document.getElementById('period-summary').innerHTML=
-    `📅 기간: ${start} ~ ${end} (${days}일 / ${Math.floor(days/7)}주 ${days%7}일 남음)<br>
-     👥 직원 ${state.staff.length}명 | 공휴일 ${state.holidays.length}건`;
+    `📅 기간: <strong>${start} ~ ${end}</strong> (${days}일 / ${w}주${d?` ${d}일`:''})<br>
+     👥 직원 ${state.staff.length}명 &nbsp;|&nbsp; 공휴일 ${state.holidays.length}건`;
+  // 종료일 인풋 동기화
+  const endEl=document.getElementById('inp-end');
+  if(endEl && !endEl.value) endEl.value=end;
 }
 function addHoliday(){
   const date=document.getElementById('inp-holi-date').value;
@@ -1250,6 +1282,99 @@ function renderExportSummary(){
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  SCHEDULE HISTORY
+// ═══════════════════════════════════════════════════════════════════
+function loadHistory(){ try{ return JSON.parse(localStorage.getItem('er_history_v1')||'[]'); }catch(e){ return []; } }
+function saveHistory(h){ localStorage.setItem('er_history_v1', JSON.stringify(h)); }
+
+function saveSnapshot(){
+  const {start, days} = state.period;
+  const end = addDays(start, days-1);
+  const defaultLabel = `${start.replace(/-/g,'.')} ~ ${end.replace(/-/g,'.')} 근무표`;
+  const label = prompt('저장할 근무표 이름을 입력하세요:', defaultLabel);
+  if(label === null) return; // 취소
+  const finalLabel = label.trim() || defaultLabel;
+
+  const history = loadHistory();
+  history.unshift({
+    id: uid(),
+    label: finalLabel,
+    savedAt: new Date().toISOString(),
+    period: {...state.period},
+    snapshot: JSON.parse(JSON.stringify(state)) // deep copy
+  });
+  // 최대 20개 보관
+  if(history.length > 20) history.splice(20);
+  saveHistory(history);
+  renderHistoryList();
+  toast(`✅ "${finalLabel}" 저장됐어요!`);
+}
+
+function renderHistoryList(){
+  const el = document.getElementById('history-list');
+  if(!el) return;
+  const history = loadHistory();
+  if(!history.length){
+    el.innerHTML = '<div class="hist-empty">저장된 근무표가 없어요.<br>위 버튼으로 현재 근무표를 저장해보세요.</div>';
+    return;
+  }
+  el.innerHTML = history.map(h=>{
+    const savedDate = new Date(h.savedAt);
+    const savedStr = `${savedDate.getFullYear()}.${String(savedDate.getMonth()+1).padStart(2,'0')}.${String(savedDate.getDate()).padStart(2,'0')} ${String(savedDate.getHours()).padStart(2,'0')}:${String(savedDate.getMinutes()).padStart(2,'0')}`;
+    const days = h.period?.days || '?';
+    const staff = h.snapshot?.staff?.length || 0;
+    return `<div class="hist-item">
+      <div style="font-size:24px">📋</div>
+      <div class="hist-info">
+        <div class="hist-label">${h.label}</div>
+        <div class="hist-meta">${days}일 · 직원 ${staff}명 · ${savedStr} 저장</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn btn-blue" style="padding:4px 10px;font-size:12px" onclick="loadSnapshot('${h.id}')">불러오기</button>
+        <button class="btn btn-red" style="padding:4px 10px;font-size:12px" onclick="deleteSnapshot('${h.id}')">삭제</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function loadSnapshot(id){
+  if(!confirm('현재 작업 중인 근무표가 이 데이터로 교체됩니다. 계속할까요?')) return;
+  const history = loadHistory();
+  const entry = history.find(h=>h.id===id);
+  if(!entry){ toast('데이터를 찾을 수 없어요'); return; }
+
+  state = JSON.parse(JSON.stringify(entry.snapshot));
+  saveState(true);
+
+  // UI 동기화
+  document.getElementById('inp-start').value = state.period.start;
+  const endDate = state.period.end || addDays(state.period.start, state.period.days-1);
+  document.getElementById('inp-end').value = endDate;
+  const d0=state.period.days; const w0=Math.floor(d0/7), r0=d0%7;
+  document.getElementById('days-calc-info').textContent = `📆 총 ${d0}일 (${w0}주 ${r0>0?r0+'일':'정확히 '+w0+'주'})`;
+  document.getElementById('min-D').value = state.minStaff.D;
+  document.getElementById('min-E').value = state.minStaff.E;
+  document.getElementById('min-N').value = state.minStaff.N;
+  renderStaffTable();
+  updateGroupStats();
+  updatePeriodSummary();
+  renderHolidays();
+  renderLeaveList();
+  updateLeaveStaffSelect();
+
+  toast(`✅ "${entry.label}" 불러왔어요!`);
+  showTab('schedule');
+}
+
+function deleteSnapshot(id){
+  if(!confirm('이 근무표를 삭제할까요?')) return;
+  const history = loadHistory().filter(h=>h.id!==id);
+  saveHistory(history);
+  renderHistoryList();
+  toast('삭제됐어요');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  AUTH SYSTEM
 // ═══════════════════════════════════════════════════════════════════
 let currentUser = null;
@@ -1447,7 +1572,12 @@ function init(){
   updateLeaveStaffSelect();
   // Sync inputs
   document.getElementById('inp-start').value=state.period.start;
-  document.getElementById('inp-days').value=state.period.days;
+  // 종료일: 저장된 end 값 또는 start+days-1 계산
+  const computedEnd = state.period.end || addDays(state.period.start, state.period.days-1);
+  document.getElementById('inp-end').value = computedEnd;
+  // 일수 안내 초기 표시
+  const d0=state.period.days; const w0=Math.floor(d0/7), r0=d0%7;
+  document.getElementById('days-calc-info').textContent = `📆 총 ${d0}일 (${w0}주 ${r0>0?r0+'일':'정확히 '+w0+'주'})`;
   document.getElementById('min-D').value=state.minStaff.D;
   document.getElementById('min-E').value=state.minStaff.E;
   document.getElementById('min-N').value=state.minStaff.N;
