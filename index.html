@@ -1421,9 +1421,18 @@ function deleteSnapshot(id){
 let currentUser = null;
 window._scheduleReadOnly = false;
 
-function hashPw(pw){
-  // 간단한 해싱 (내부용 — 보안 강화 시 bcrypt 등으로 교체 가능)
-  return btoa(unescape(encodeURIComponent(pw + '__er_salt_2024__')));
+// SHA-256 해싱 (Web Crypto API — 비동기)
+async function hashPw(pw){
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(pw + '__er_salt_v2_2024__');
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
+  } catch(e) {
+    // 폴백 (구형 브라우저)
+    return btoa(unescape(encodeURIComponent(pw + '__er_salt_v2_2024__')));
+  }
 }
 function loadAuth(){
   try{ return JSON.parse(localStorage.getItem('er_auth_v1')||'{"users":[]}'); }
@@ -1442,7 +1451,7 @@ function initAuth(){
   document.getElementById('auth-overlay').style.display='flex';
 }
 
-function doSetup(){
+async function doSetup(){
   const username  = document.getElementById('setup-username').value.trim();
   const dispName  = document.getElementById('setup-displayname').value.trim()||username;
   const pw        = document.getElementById('setup-password').value;
@@ -1454,19 +1463,20 @@ function doSetup(){
   if(pw!==pw2){ showAuthErr(errEl,'비밀번호가 일치하지 않아요'); return; }
   const auth = loadAuth();
   if(auth.users.some(u=>u.username===username)){ showAuthErr(errEl,'이미 사용 중인 아이디예요'); return; }
-  const newUser = {id:uid(), username, displayName:dispName, passwordHash:hashPw(pw), role:'admin'};
+  const newUser = {id:uid(), username, displayName:dispName, passwordHash:await hashPw(pw), role:'admin'};
   auth.users.push(newUser);
   saveAuth(auth);
   loginAs(newUser);
 }
 
-function doLogin(){
+async function doLogin(){
   const username = document.getElementById('auth-username').value.trim();
   const pw       = document.getElementById('auth-password').value;
   const errEl    = document.getElementById('auth-error');
   errEl.style.display='none';
   const auth = loadAuth();
-  const user = auth.users.find(u=>u.username===username && u.passwordHash===hashPw(pw));
+  const hashed = await hashPw(pw);
+  const user = auth.users.find(u=>u.username===username && u.passwordHash===hashed);
   if(!user){ showAuthErr(errEl,'아이디 또는 비밀번호가 맞지 않아요'); return; }
   loginAs(user);
 }
@@ -1528,7 +1538,7 @@ function showPwModal(){
 function closePwModal(){ document.getElementById('pw-modal').classList.remove('open'); }
 document.getElementById('pw-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closePwModal();});
 
-function doChangePw(){
+async function doChangePw(){
   if(!currentUser) return;
   const cur  = document.getElementById('pw-current').value;
   const nw   = document.getElementById('pw-new').value;
@@ -1538,10 +1548,10 @@ function doChangePw(){
   const auth = loadAuth();
   const user = auth.users.find(u=>u.id===currentUser.id);
   if(!user){ showAuthErr(errEl,'계정을 찾을 수 없어요'); return; }
-  if(user.passwordHash!==hashPw(cur)){ showAuthErr(errEl,'현재 비밀번호가 틀렸어요'); return; }
+  if(user.passwordHash!==await hashPw(cur)){ showAuthErr(errEl,'현재 비밀번호가 틀렸어요'); return; }
   if(nw.length<4){ showAuthErr(errEl,'새 비밀번호는 4자 이상이어야 해요'); return; }
   if(nw!==nw2){ showAuthErr(errEl,'새 비밀번호가 일치하지 않아요'); return; }
-  user.passwordHash = hashPw(nw);
+  user.passwordHash = await hashPw(nw);
   saveAuth(auth);
   closePwModal();
   toast('비밀번호가 변경됐어요! ✅');
@@ -1564,7 +1574,7 @@ function renderUserMgmt(){
     </tr>`).join('');
 }
 
-function addUser(){
+async function addUser(){
   const username   = document.getElementById('new-username').value.trim();
   const dispName   = document.getElementById('new-displayname').value.trim()||username;
   const pw         = document.getElementById('new-password').value;
@@ -1573,7 +1583,7 @@ function addUser(){
   if(pw.length<4){ toast('비밀번호는 4자 이상이어야 해요'); return; }
   const auth = loadAuth();
   if(auth.users.some(u=>u.username===username)){ toast('이미 있는 아이디예요'); return; }
-  auth.users.push({id:uid(), username, displayName:dispName, passwordHash:hashPw(pw), role});
+  auth.users.push({id:uid(), username, displayName:dispName, passwordHash:await hashPw(pw), role});
   saveAuth(auth);
   document.getElementById('new-username').value='';
   document.getElementById('new-displayname').value='';
@@ -1582,13 +1592,13 @@ function addUser(){
   toast(`✅ ${dispName} 계정이 추가됐어요!`);
 }
 
-function resetUserPw(userId){
+async function resetUserPw(userId){
   const newPw = prompt('새 비밀번호를 입력하세요 (4자 이상):');
   if(!newPw){ return; }
   if(newPw.length<4){ toast('비밀번호는 4자 이상이어야 해요'); return; }
   const auth = loadAuth();
   const user = auth.users.find(u=>u.id===userId);
-  if(user){ user.passwordHash=hashPw(newPw); saveAuth(auth); toast(`🔑 ${user.displayName||user.username}의 비밀번호가 초기화됐어요`); }
+  if(user){ user.passwordHash=await hashPw(newPw); saveAuth(auth); toast(`🔑 ${user.displayName||user.username}의 비밀번호가 초기화됐어요`); }
 }
 
 function deleteUser(userId){
