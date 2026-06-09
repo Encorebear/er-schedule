@@ -244,34 +244,6 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
 </head>
 <body>
 
-<!-- ══ FIREBASE SETUP OVERLAY ══════════════════════════════════════════ -->
-<div id="fb-overlay" style="display:none">
-  <div class="fb-box">
-    <div class="fb-logo">🔥</div>
-    <h2>Firebase 연결 설정</h2>
-    <p class="fb-sub">기기 간 데이터 동기화를 위해 Firebase 프로젝트를 연결해주세요<br>최초 1회만 설정하면 돼요</p>
-
-    <div class="fb-steps">
-      <strong>① Firebase 프로젝트 만들기</strong><br>
-      <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> 접속 →
-      프로젝트 추가 → 이름 입력 (예: er-schedule) → 만들기<br><br>
-      <strong>② 웹 앱 추가</strong><br>
-      프로젝트 홈 → &lt;/&gt; 웹 아이콘 클릭 → 앱 닉네임 입력 → 등록<br>
-      → <code>firebaseConfig</code> 객체 내용 복사<br><br>
-      <strong>③ Firestore 활성화</strong><br>
-      왼쪽 메뉴 Firestore Database → 데이터베이스 만들기 →
-      테스트 모드 선택 → 위치 선택 → 완료<br><br>
-      <strong>④ 아래에 config 붙여넣기</strong>
-    </div>
-
-    <textarea id="fb-config-input" class="fb-textarea"
-      placeholder='{"apiKey":"AIza...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'></textarea>
-    <div id="fb-err" class="fb-err"></div>
-    <div id="fb-loading" class="fb-loading">🔥 Firebase 연결 중...</div>
-    <button class="btn-fb" onclick="doFbSetup()">연결하기</button>
-  </div>
-</div>
-
 <!-- ══ AUTH OVERLAY ══════════════════════════════════════════════════════ -->
 <div id="auth-overlay">
   <div class="auth-box">
@@ -600,28 +572,15 @@ let db = null;
 let authCache = {users:[]};
 const FB_COL = 'er_schedule';
 
-// Firebase 초기화
-async function initFirebase(){
-  const raw = localStorage.getItem('fb_config');
-  if(!raw){
-    document.getElementById('fb-overlay').style.display='flex';
-    return false;
-  }
-  try{
-    const cfg = JSON.parse(raw);
-    if(!firebase.apps.length) firebase.initializeApp(cfg);
-    db = firebase.firestore();
-    // 연결 테스트
-    await db.collection(FB_COL).doc('ping').set({t: Date.now()});
-    setSyncStatus('ok','☁️ 동기화 중');
-    return true;
-  }catch(e){
-    console.warn('Firebase 연결 실패:', e);
-    setSyncStatus('err','⚠️ 오프라인');
-    db = null;
-    return false; // 오프라인 모드로 fallback
-  }
-}
+// ── Firebase 설정 (고정값) ──────────────────────────────
+const FB_CONFIG = {
+  apiKey: "AIzaSyD1Se35AvAkK4wGxMqf19z1Ane1TFPq8pQ",
+  authDomain: "er-schedule-97ab3.firebaseapp.com",
+  projectId: "er-schedule-97ab3",
+  storageBucket: "er-schedule-97ab3.firebasestorage.app",
+  messagingSenderId: "622279983444",
+  appId: "1:622279983444:web:13514812dd9e00fd2e48c1"
+};
 
 function setSyncStatus(type, label){
   const el = document.getElementById('sync-indicator');
@@ -630,46 +589,20 @@ function setSyncStatus(type, label){
   el.className = type;
 }
 
-// Firebase 설정 UI 처리
-async function doFbSetup(){
-  const input = document.getElementById('fb-config-input').value.trim();
-  const errEl = document.getElementById('fb-err');
-  const loading = document.getElementById('fb-loading');
-  errEl.style.display='none';
-
-  // JSON 파싱 시도
-  let cfg;
+// Firebase 초기화
+async function initFirebase(){
   try{
-    // { apiKey: "..." } 형식과 firebaseConfig = {...} 형식 모두 처리
-    const cleaned = input
-      .replace(/^.*?firebaseConfig\s*=\s*/,'')
-      .replace(/;?\s*$/,'')
-      .trim();
-    cfg = JSON.parse(cleaned);
-    if(!cfg.apiKey || !cfg.projectId) throw new Error('필수 항목 누락');
-  }catch(e){
-    errEl.textContent='❌ 올바른 JSON 형식이 아니에요. Firebase 콘솔에서 config 객체 내용을 그대로 붙여넣어주세요.';
-    errEl.style.display='block';
-    return;
-  }
-
-  loading.style.display='block';
-  try{
-    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
     db = firebase.firestore();
+    // 연결 테스트 겸 ping
     await db.collection(FB_COL).doc('ping').set({t: Date.now()});
-    localStorage.setItem('fb_config', JSON.stringify(cfg));
-    document.getElementById('fb-overlay').style.display='none';
-    loading.style.display='none';
-    setSyncStatus('ok','☁️ 연결됨');
-    toast('🔥 Firebase 연결 성공!');
-    initApp(); // 앱 본격 초기화
+    setSyncStatus('ok','☁️ 동기화');
+    return true;
   }catch(e){
-    loading.style.display='none';
-    errEl.textContent='❌ 연결 실패: ' + (e.message||'config를 확인해주세요');
-    errEl.style.display='block';
+    console.warn('Firebase 연결 실패 — 오프라인 모드:', e);
+    setSyncStatus('err','⚠️ 오프라인');
     db = null;
-    if(firebase.apps.length) firebase.apps[0].delete().catch(()=>{});
+    return false;
   }
 }
 
@@ -1881,12 +1814,9 @@ async function initApp(){
 }
 
 async function init(){
-  // Firebase 설정 확인 → 있으면 연결 후 앱 시작, 없으면 설정 화면
-  const fbOk = await initFirebase();
-  if(fbOk){
-    await initApp();
-  }
-  // fbOk=false면 doFbSetup()에서 Firebase 설정 후 initApp() 호출
+  // Firebase 연결 시도 (실패해도 오프라인 모드로 동작)
+  await initFirebase();
+  await initApp();
 }
 init();
 
