@@ -201,9 +201,76 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
 
 /* ── CHANGE PASSWORD MODAL ── */
 #pw-modal .modal{max-width:380px}
+
+/* ── FIREBASE SETUP OVERLAY ── */
+#fb-overlay{
+  position:fixed;inset:0;background:linear-gradient(135deg,#0f172a,#1e3a5f);
+  display:flex;align-items:center;justify-content:center;z-index:9999;
+}
+.fb-box{
+  background:#1e293b;border-radius:20px;padding:36px 32px;width:100%;max-width:460px;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);color:#f1f5f9;
+}
+.fb-logo{font-size:48px;text-align:center;margin-bottom:12px}
+.fb-box h2{font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;color:#fff}
+.fb-box .fb-sub{font-size:13px;color:#94a3b8;text-align:center;margin-bottom:24px}
+.fb-steps{background:#0f172a;border-radius:12px;padding:16px;margin-bottom:20px;font-size:12px;line-height:1.9;color:#cbd5e1}
+.fb-steps a{color:#60a5fa;text-decoration:none}
+.fb-steps strong{color:#f1f5f9}
+.fb-textarea{
+  width:100%;min-height:120px;background:#0f172a;border:1.5px solid #334155;
+  border-radius:10px;padding:12px;color:#e2e8f0;font-size:12px;font-family:monospace;
+  resize:vertical;outline:none;
+}
+.fb-textarea:focus{border-color:#3b82f6}
+.fb-textarea::placeholder{color:#475569}
+.fb-err{color:#f87171;font-size:12px;margin-top:8px;display:none}
+.btn-fb{
+  width:100%;margin-top:14px;padding:13px;background:#3b82f6;color:#fff;
+  border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;
+  font-family:inherit;transition:.2s;
+}
+.btn-fb:hover{background:#2563eb}
+.fb-loading{text-align:center;padding:20px 0;color:#94a3b8;font-size:14px;display:none}
+
+/* 동기화 상태 표시 */
+#sync-indicator{
+  font-size:11px;padding:2px 8px;border-radius:10px;margin-left:6px;
+  background:rgba(255,255,255,.15);color:rgba(255,255,255,.8);
+}
+#sync-indicator.ok{background:rgba(16,185,129,.25);color:#6ee7b7}
+#sync-indicator.err{background:rgba(239,68,68,.25);color:#fca5a5}
 </style>
 </head>
 <body>
+
+<!-- ══ FIREBASE SETUP OVERLAY ══════════════════════════════════════════ -->
+<div id="fb-overlay" style="display:none">
+  <div class="fb-box">
+    <div class="fb-logo">🔥</div>
+    <h2>Firebase 연결 설정</h2>
+    <p class="fb-sub">기기 간 데이터 동기화를 위해 Firebase 프로젝트를 연결해주세요<br>최초 1회만 설정하면 돼요</p>
+
+    <div class="fb-steps">
+      <strong>① Firebase 프로젝트 만들기</strong><br>
+      <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> 접속 →
+      프로젝트 추가 → 이름 입력 (예: er-schedule) → 만들기<br><br>
+      <strong>② 웹 앱 추가</strong><br>
+      프로젝트 홈 → &lt;/&gt; 웹 아이콘 클릭 → 앱 닉네임 입력 → 등록<br>
+      → <code>firebaseConfig</code> 객체 내용 복사<br><br>
+      <strong>③ Firestore 활성화</strong><br>
+      왼쪽 메뉴 Firestore Database → 데이터베이스 만들기 →
+      테스트 모드 선택 → 위치 선택 → 완료<br><br>
+      <strong>④ 아래에 config 붙여넣기</strong>
+    </div>
+
+    <textarea id="fb-config-input" class="fb-textarea"
+      placeholder='{"apiKey":"AIza...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}'></textarea>
+    <div id="fb-err" class="fb-err"></div>
+    <div id="fb-loading" class="fb-loading">🔥 Firebase 연결 중...</div>
+    <button class="btn-fb" onclick="doFbSetup()">연결하기</button>
+  </div>
+</div>
 
 <!-- ══ AUTH OVERLAY ══════════════════════════════════════════════════════ -->
 <div id="auth-overlay">
@@ -268,6 +335,7 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
   </nav>
   <div class="header-right">
     <span id="header-user" style="font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap"></span>
+    <span id="sync-indicator" title="Firebase 동기화 상태"></span>
     <button class="btn-sm btn-primary" id="btn-save" onclick="saveState()">💾 저장</button>
     <button class="btn-sm btn-warn" onclick="showPwModal()">👤 내 계정</button>
     <button class="btn-sm btn-danger" onclick="doLogout()">로그아웃</button>
@@ -502,6 +570,9 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
 
 <div id="toast"></div>
 
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
@@ -523,17 +594,136 @@ let state = {
 let _modalStaffId = null, _modalDayIdx = null;
 
 // ═══════════════════════════════════════════════════════════════════
-//  PERSISTENCE
+//  FIREBASE & PERSISTENCE
 // ═══════════════════════════════════════════════════════════════════
-function saveState(silent=false){
-  localStorage.setItem('er_schedule_v1', JSON.stringify(state));
+let db = null;
+let authCache = {users:[]};
+const FB_COL = 'er_schedule';
+
+// Firebase 초기화
+async function initFirebase(){
+  const raw = localStorage.getItem('fb_config');
+  if(!raw){
+    document.getElementById('fb-overlay').style.display='flex';
+    return false;
+  }
+  try{
+    const cfg = JSON.parse(raw);
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    db = firebase.firestore();
+    // 연결 테스트
+    await db.collection(FB_COL).doc('ping').set({t: Date.now()});
+    setSyncStatus('ok','☁️ 동기화 중');
+    return true;
+  }catch(e){
+    console.warn('Firebase 연결 실패:', e);
+    setSyncStatus('err','⚠️ 오프라인');
+    db = null;
+    return false; // 오프라인 모드로 fallback
+  }
+}
+
+function setSyncStatus(type, label){
+  const el = document.getElementById('sync-indicator');
+  if(!el) return;
+  el.textContent = label;
+  el.className = type;
+}
+
+// Firebase 설정 UI 처리
+async function doFbSetup(){
+  const input = document.getElementById('fb-config-input').value.trim();
+  const errEl = document.getElementById('fb-err');
+  const loading = document.getElementById('fb-loading');
+  errEl.style.display='none';
+
+  // JSON 파싱 시도
+  let cfg;
+  try{
+    // { apiKey: "..." } 형식과 firebaseConfig = {...} 형식 모두 처리
+    const cleaned = input
+      .replace(/^.*?firebaseConfig\s*=\s*/,'')
+      .replace(/;?\s*$/,'')
+      .trim();
+    cfg = JSON.parse(cleaned);
+    if(!cfg.apiKey || !cfg.projectId) throw new Error('필수 항목 누락');
+  }catch(e){
+    errEl.textContent='❌ 올바른 JSON 형식이 아니에요. Firebase 콘솔에서 config 객체 내용을 그대로 붙여넣어주세요.';
+    errEl.style.display='block';
+    return;
+  }
+
+  loading.style.display='block';
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    db = firebase.firestore();
+    await db.collection(FB_COL).doc('ping').set({t: Date.now()});
+    localStorage.setItem('fb_config', JSON.stringify(cfg));
+    document.getElementById('fb-overlay').style.display='none';
+    loading.style.display='none';
+    setSyncStatus('ok','☁️ 연결됨');
+    toast('🔥 Firebase 연결 성공!');
+    initApp(); // 앱 본격 초기화
+  }catch(e){
+    loading.style.display='none';
+    errEl.textContent='❌ 연결 실패: ' + (e.message||'config를 확인해주세요');
+    errEl.style.display='block';
+    db = null;
+    if(firebase.apps.length) firebase.apps[0].delete().catch(()=>{});
+  }
+}
+
+// ── 상태 저장/로드 ──────────────────────────────────────────────
+async function saveState(silent=false){
+  localStorage.setItem('er_schedule_v1', JSON.stringify(state)); // 오프라인 캐시
+  if(db){
+    try{
+      await db.collection(FB_COL).doc('state').set(state);
+      setSyncStatus('ok','☁️ 저장됨');
+    }catch(e){
+      setSyncStatus('err','⚠️ 저장 실패');
+    }
+  }
   if(!silent) toast('저장됐어요!');
 }
-function loadState(){
+
+async function loadState(){
+  if(db){
+    try{
+      const snap = await db.collection(FB_COL).doc('state').get();
+      if(snap.exists){
+        state = snap.data();
+        localStorage.setItem('er_schedule_v1', JSON.stringify(state));
+        return;
+      }
+    }catch(e){ /* fallback */ }
+  }
+  // 오프라인 또는 Firebase 없음 → localStorage
   try{
     const raw = localStorage.getItem('er_schedule_v1');
     if(raw) state = JSON.parse(raw);
   }catch(e){}
+}
+
+// 실시간 동기화 리스너 (다른 기기에서 수정 시 자동 반영)
+function setupRealtimeSync(){
+  if(!db) return;
+  db.collection(FB_COL).doc('state').onSnapshot(snap=>{
+    if(snap.exists && snap.metadata.hasPendingWrites===false){
+      const newState = snap.data();
+      // 내가 저장한 것과 다를 때만 (다른 기기에서 업데이트)
+      if(JSON.stringify(newState) !== JSON.stringify(state)){
+        state = newState;
+        localStorage.setItem('er_schedule_v1', JSON.stringify(state));
+        // UI 갱신
+        renderStaffTable();
+        updateGroupStats();
+        renderScheduleGrid();
+        setSyncStatus('ok','☁️ 동기화됨');
+        toast('📡 다른 기기에서 업데이트됐어요!', 3000);
+      }
+    }
+  }, ()=>{ setSyncStatus('err','⚠️ 연결 끊김'); });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1327,8 +1517,26 @@ function renderExportSummary(){
 // ═══════════════════════════════════════════════════════════════════
 //  SCHEDULE HISTORY
 // ═══════════════════════════════════════════════════════════════════
-function loadHistory(){ try{ return JSON.parse(localStorage.getItem('er_history_v1')||'[]'); }catch(e){ return []; } }
-function saveHistory(h){ localStorage.setItem('er_history_v1', JSON.stringify(h)); }
+function loadHistory(){
+  try{ return JSON.parse(localStorage.getItem('er_history_v1')||'[]'); }catch(e){ return []; }
+}
+async function loadHistoryFromDB(){
+  if(db){
+    try{
+      const snap = await db.collection(FB_COL).doc('history').get();
+      if(snap.exists && snap.data().items){
+        const h = snap.data().items;
+        localStorage.setItem('er_history_v1', JSON.stringify(h));
+        return h;
+      }
+    }catch(e){}
+  }
+  return loadHistory();
+}
+function saveHistory(h){
+  localStorage.setItem('er_history_v1', JSON.stringify(h));
+  if(db) db.collection(FB_COL).doc('history').set({items:h}).catch(()=>{});
+}
 
 function saveSnapshot(){
   const {start, days} = state.period;
@@ -1436,11 +1644,30 @@ async function hashPw(pw){
     return btoa(unescape(encodeURIComponent(pw + '__er_salt_v2_2024__')));
   }
 }
-function loadAuth(){
-  try{ return JSON.parse(localStorage.getItem('er_auth_v1')||'{"users":[]}'); }
-  catch(e){ return {users:[]}; }
+function loadAuth(){ return authCache; }
+
+async function loadAuthFromDB(){
+  if(db){
+    try{
+      const snap = await db.collection(FB_COL).doc('auth').get();
+      if(snap.exists){
+        authCache = snap.data();
+        localStorage.setItem('er_auth_v1', JSON.stringify(authCache));
+        return;
+      }
+    }catch(e){}
+  }
+  try{
+    const raw = localStorage.getItem('er_auth_v1');
+    authCache = raw ? JSON.parse(raw) : {users:[]};
+  }catch(e){ authCache = {users:[]}; }
 }
-function saveAuth(a){ localStorage.setItem('er_auth_v1', JSON.stringify(a)); }
+
+function saveAuth(a){
+  authCache = a;
+  localStorage.setItem('er_auth_v1', JSON.stringify(a));
+  if(db) db.collection(FB_COL).doc('auth').set(a).catch(()=>{});
+}
 
 function initAuth(){
   const auth = loadAuth();
@@ -1625,27 +1852,41 @@ function deleteUser(userId){
 // ═══════════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════════
-function init(){
-  loadState();
+function renderUI(){
   renderStaffTable();
   updateGroupStats();
   updatePeriodSummary();
   renderHolidays();
   renderLeaveList();
   updateLeaveStaffSelect();
-  // Sync inputs
-  document.getElementById('inp-start').value=state.period.start;
-  // 종료일: 저장된 end 값 또는 start+days-1 계산
+  document.getElementById('inp-start').value = state.period.start;
   const computedEnd = state.period.end || addDays(state.period.start, state.period.days-1);
   document.getElementById('inp-end').value = computedEnd;
-  // 일수 안내 초기 표시
   const d0=state.period.days; const w0=Math.floor(d0/7), r0=d0%7;
   document.getElementById('days-calc-info').textContent = `📆 총 ${d0}일 (${w0}주 ${r0>0?r0+'일':'정확히 '+w0+'주'})`;
   document.getElementById('min-D').value=state.minStaff.D;
   document.getElementById('min-E').value=state.minStaff.E;
   document.getElementById('min-N').value=state.minStaff.N;
-  // Auth — 로그인 화면 표시
+}
+
+async function initApp(){
+  // 1. Firebase 데이터 로드
+  await Promise.all([loadState(), loadAuthFromDB()]);
+  // 2. UI 그리기
+  renderUI();
+  // 3. 실시간 동기화 리스너 등록
+  setupRealtimeSync();
+  // 4. 로그인 화면 표시
   initAuth();
+}
+
+async function init(){
+  // Firebase 설정 확인 → 있으면 연결 후 앱 시작, 없으면 설정 화면
+  const fbOk = await initFirebase();
+  if(fbOk){
+    await initApp();
+  }
+  // fbOk=false면 doFbSetup()에서 Firebase 설정 후 initApp() 호출
 }
 init();
 
