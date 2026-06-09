@@ -126,20 +126,101 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 
 /* ── EXPORT ── */
 .export-preview{background:#f8fafc;border-radius:8px;padding:12px;font-size:12px;color:#475569;line-height:1.8}
+
+/* ── AUTH OVERLAY ── */
+#auth-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#0f172a,#1e3a8a,#1e40af);display:flex;align-items:center;justify-content:center;z-index:10000;padding:20px}
+.auth-box{background:#fff;border-radius:24px;padding:40px 36px;width:100%;max-width:400px;box-shadow:0 24px 80px rgba(0,0,0,.4);text-align:center}
+.auth-logo{font-size:52px;margin-bottom:8px;line-height:1}
+.auth-box h2{font-size:22px;font-weight:800;color:#1e40af;margin-bottom:4px}
+.auth-subtitle{color:#64748b;font-size:13px;margin-bottom:28px}
+.auth-input{width:100%;padding:11px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;font-family:inherit;outline:none;margin-bottom:10px;transition:.2s;display:block}
+.auth-input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.auth-btn{width:100%;padding:13px;background:#2563eb;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;transition:.2s;margin-top:6px}
+.auth-btn:hover{background:#1d4ed8}
+.auth-err{color:#dc2626;font-size:12px;margin:-4px 0 8px;text-align:left;display:none}
+.auth-notice{background:#fef3c7;color:#92400e;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:16px;text-align:left;line-height:1.6}
+
+/* ── USER MANAGEMENT TAB ── */
+.user-table{width:100%;border-collapse:collapse;font-size:13px}
+.user-table th{background:#f8fafc;padding:8px 12px;text-align:left;font-weight:700;color:#475569;border-bottom:2px solid #e2e8f0}
+.user-table td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.user-table tr:hover td{background:#f8fafc}
+.role-badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700}
+.role-admin{background:#dbeafe;color:#1d4ed8}
+.role-user{background:#f0fdf4;color:#16a34a}
+
+/* ── CHANGE PASSWORD MODAL ── */
+#pw-modal .modal{max-width:380px}
 </style>
 </head>
 <body>
 
+<!-- ══ AUTH OVERLAY ══════════════════════════════════════════════════════ -->
+<div id="auth-overlay">
+  <div class="auth-box">
+    <div class="auth-logo">🏥</div>
+    <h2>응급실 근무표</h2>
+    <p class="auth-subtitle" id="auth-subtitle">계정으로 로그인하세요</p>
+
+    <!-- 로그인 폼 -->
+    <div id="auth-login-form">
+      <input class="auth-input" id="auth-username" type="text" placeholder="아이디" autocomplete="username">
+      <input class="auth-input" id="auth-password" type="password" placeholder="비밀번호" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()">
+      <div class="auth-err" id="auth-error"></div>
+      <button class="auth-btn" onclick="doLogin()">🔐 로그인</button>
+    </div>
+
+    <!-- 최초 설정 폼 (관리자 없을 때만 표시) -->
+    <div id="auth-setup-form" style="display:none">
+      <div class="auth-notice">⚠️ 처음 사용합니다.<br>관리자 계정을 만들어주세요.</div>
+      <input class="auth-input" id="setup-username" type="text" placeholder="관리자 아이디">
+      <input class="auth-input" id="setup-displayname" type="text" placeholder="표시 이름 (예: 수간호사 김OO)">
+      <input class="auth-input" id="setup-password" type="password" placeholder="비밀번호 (4자 이상)">
+      <input class="auth-input" id="setup-password2" type="password" placeholder="비밀번호 확인"
+             onkeydown="if(event.key==='Enter')doSetup()">
+      <div class="auth-err" id="setup-error"></div>
+      <button class="auth-btn" onclick="doSetup()">✅ 관리자 계정 만들기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CHANGE PASSWORD MODAL ══════════════════════════════════════════════ -->
+<div class="modal-bg" id="pw-modal">
+  <div class="modal" style="max-width:380px">
+    <h3>🔐 비밀번호 변경</h3>
+    <div class="field-group"><label>현재 비밀번호</label>
+      <input type="password" id="pw-current" class="auth-input" style="margin-bottom:0">
+    </div>
+    <div class="field-group"><label>새 비밀번호</label>
+      <input type="password" id="pw-new" class="auth-input" style="margin-bottom:0">
+    </div>
+    <div class="field-group"><label>새 비밀번호 확인</label>
+      <input type="password" id="pw-new2" class="auth-input" style="margin-bottom:0"
+             onkeydown="if(event.key==='Enter')doChangePw()">
+    </div>
+    <div class="auth-err" id="pw-error" style="margin-top:6px"></div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closePwModal()">취소</button>
+      <button class="btn btn-blue" onclick="doChangePw()">변경</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <h1>🏥 응급실 근무표</h1>
   <nav class="tab-nav">
-    <button class="tab-btn active" onclick="showTab('staff')">👥 직원 관리</button>
-    <button class="tab-btn" onclick="showTab('period')">📅 기간 설정</button>
-    <button class="tab-btn" onclick="showTab('schedule')">📋 근무표</button>
-    <button class="tab-btn" onclick="showTab('export')">📤 엑셀 출력</button>
+    <button class="tab-btn active" id="tab-btn-staff" onclick="showTab('staff')">👥 직원 관리</button>
+    <button class="tab-btn" id="tab-btn-period" onclick="showTab('period')">📅 기간 설정</button>
+    <button class="tab-btn" id="tab-btn-schedule" onclick="showTab('schedule')">📋 근무표</button>
+    <button class="tab-btn" id="tab-btn-export" onclick="showTab('export')">📤 엑셀 출력</button>
+    <button class="tab-btn" id="tab-btn-accounts" onclick="showTab('accounts')" style="display:none">🔐 계정 관리</button>
   </nav>
   <div class="header-right">
-    <button class="btn-sm btn-primary" onclick="saveState()">💾 저장</button>
+    <span id="header-user" style="font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap"></span>
+    <button class="btn-sm btn-primary" id="btn-save" onclick="saveState()">💾 저장</button>
+    <button class="btn-sm btn-warn" onclick="showPwModal()">👤 내 계정</button>
+    <button class="btn-sm btn-danger" onclick="doLogout()">로그아웃</button>
   </div>
 </header>
 
@@ -266,10 +347,10 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 <div id="tab-schedule" class="tab-content">
   <div class="card" style="padding:12px 16px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-purple btn-xl" onclick="runAutoSchedule()">⚡ 자동 근무표 생성</button>
-      <button class="btn btn-gray" onclick="clearSchedule()">🗑️ 초기화</button>
-      <button class="btn btn-green" onclick="showTab('export')">📤 엑셀 출력</button>
-      <span style="font-size:12px;color:#64748b">셀 클릭 → 근무 변경</span>
+      <button class="btn btn-purple btn-xl" id="btn-auto-schedule" onclick="runAutoSchedule()">⚡ 자동 근무표 생성</button>
+      <button class="btn btn-gray" id="btn-clear-schedule" onclick="clearSchedule()">🗑️ 초기화</button>
+      <button class="btn btn-green" id="btn-export-link" onclick="showTab('export')">📤 엑셀 출력</button>
+      <span style="font-size:12px;color:#64748b" id="sched-hint">셀 클릭 → 근무 변경</span>
       <span id="gen-status" style="font-size:12px;color:#16a34a;font-weight:600"></span>
     </div>
     <div class="legend" style="margin-top:8px">
@@ -310,6 +391,44 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
     <div class="card">
       <div class="card-title">📊 현재 근무표 요약</div>
       <div id="export-summary"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TAB 5: 계정 관리 (관리자 전용) ═══════════════════════════════════ -->
+<div id="tab-accounts" class="tab-content">
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">➕ 새 계정 추가</div>
+      <div class="field-group"><label>아이디</label>
+        <input id="new-username" type="text" placeholder="로그인에 사용할 아이디">
+      </div>
+      <div class="field-group"><label>표시 이름</label>
+        <input id="new-displayname" type="text" placeholder="이름 (예: 김간호사)">
+      </div>
+      <div class="field-group"><label>비밀번호</label>
+        <input id="new-password" type="password" placeholder="초기 비밀번호 (4자 이상)">
+      </div>
+      <div class="field-group"><label>권한</label>
+        <select id="new-role">
+          <option value="user">일반 (근무표 조회만 가능)</option>
+          <option value="admin">관리자 (모든 기능 사용 가능)</option>
+        </select>
+      </div>
+      <button class="btn btn-blue" style="width:100%;margin-top:4px" onclick="addUser()">+ 계정 추가</button>
+    </div>
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>👥 계정 목록</span>
+        <button class="btn btn-gray" style="padding:3px 10px;font-size:11px" onclick="renderUserMgmt()">🔄 새로고침</button>
+      </div>
+      <table class="user-table">
+        <thead><tr><th>표시 이름</th><th>아이디</th><th>권한</th><th>관리</th></tr></thead>
+        <tbody id="user-list-tbody"></tbody>
+      </table>
+      <p style="font-size:11px;color:#94a3b8;margin-top:10px">
+        💡 일반 계정은 근무표 조회만 가능하고, 본인 비밀번호만 변경할 수 있어요.
+      </p>
     </div>
   </div>
 </div>
@@ -374,13 +493,13 @@ function showTab(name){
   document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  document.querySelectorAll('.tab-btn').forEach(b=>{
-    if(b.textContent.toLowerCase().includes(name==='staff'?'직원':name==='period'?'기간':name==='schedule'?'근무표':name==='export'?'엑셀':''))
-      b.classList.add('active');
-  });
+  const btnId='tab-btn-'+name;
+  const target=document.getElementById(btnId);
+  if(target) target.classList.add('active');
   if(name==='schedule') renderScheduleGrid();
   if(name==='period'){ updatePeriodSummary(); renderLeaveList(); updateLeaveStaffSelect(); }
   if(name==='export') renderExportSummary();
+  if(name==='accounts') renderUserMgmt();
 }
 function getDate(d){ return new Date(d+'T00:00:00'); }
 function addDays(dateStr,n){ const d=getDate(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
@@ -908,6 +1027,7 @@ function renderScheduleGrid(){
 //  CELL EDIT MODAL
 // ═══════════════════════════════════════════════════════════════════
 function openCellModal(staffId, dayIdx){
+  if(window._scheduleReadOnly) return; // 일반 사용자 편집 차단
   _modalStaffId=staffId;
   _modalDayIdx=dayIdx;
   const s=state.staff.find(x=>x.id===staffId);
@@ -1130,6 +1250,191 @@ function renderExportSummary(){
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  AUTH SYSTEM
+// ═══════════════════════════════════════════════════════════════════
+let currentUser = null;
+window._scheduleReadOnly = false;
+
+function hashPw(pw){
+  // 간단한 해싱 (내부용 — 보안 강화 시 bcrypt 등으로 교체 가능)
+  return btoa(unescape(encodeURIComponent(pw + '__er_salt_2024__')));
+}
+function loadAuth(){
+  try{ return JSON.parse(localStorage.getItem('er_auth_v1')||'{"users":[]}'); }
+  catch(e){ return {users:[]}; }
+}
+function saveAuth(a){ localStorage.setItem('er_auth_v1', JSON.stringify(a)); }
+
+function initAuth(){
+  const auth = loadAuth();
+  const hasAdmin = auth.users.some(u=>u.role==='admin');
+  if(!hasAdmin){
+    document.getElementById('auth-setup-form').style.display='block';
+    document.getElementById('auth-login-form').style.display='none';
+    document.getElementById('auth-subtitle').textContent='처음 사용하시네요! 관리자 계정을 설정해주세요';
+  }
+  document.getElementById('auth-overlay').style.display='flex';
+}
+
+function doSetup(){
+  const username  = document.getElementById('setup-username').value.trim();
+  const dispName  = document.getElementById('setup-displayname').value.trim()||username;
+  const pw        = document.getElementById('setup-password').value;
+  const pw2       = document.getElementById('setup-password2').value;
+  const errEl     = document.getElementById('setup-error');
+  errEl.style.display='none';
+  if(!username){ showAuthErr(errEl,'아이디를 입력해주세요'); return; }
+  if(pw.length<4){ showAuthErr(errEl,'비밀번호는 4자 이상이어야 해요'); return; }
+  if(pw!==pw2){ showAuthErr(errEl,'비밀번호가 일치하지 않아요'); return; }
+  const auth = loadAuth();
+  if(auth.users.some(u=>u.username===username)){ showAuthErr(errEl,'이미 사용 중인 아이디예요'); return; }
+  const newUser = {id:uid(), username, displayName:dispName, passwordHash:hashPw(pw), role:'admin'};
+  auth.users.push(newUser);
+  saveAuth(auth);
+  loginAs(newUser);
+}
+
+function doLogin(){
+  const username = document.getElementById('auth-username').value.trim();
+  const pw       = document.getElementById('auth-password').value;
+  const errEl    = document.getElementById('auth-error');
+  errEl.style.display='none';
+  const auth = loadAuth();
+  const user = auth.users.find(u=>u.username===username && u.passwordHash===hashPw(pw));
+  if(!user){ showAuthErr(errEl,'아이디 또는 비밀번호가 맞지 않아요'); return; }
+  loginAs(user);
+}
+
+function loginAs(user){
+  currentUser = user;
+  document.getElementById('auth-overlay').style.display='none';
+  document.getElementById('header-user').textContent =
+    `${user.displayName||user.username}`;
+
+  const isAdmin = user.role==='admin';
+  window._scheduleReadOnly = !isAdmin;
+
+  // 탭 노출 제어
+  document.getElementById('tab-btn-staff').style.display    = isAdmin?'':'none';
+  document.getElementById('tab-btn-period').style.display   = isAdmin?'':'none';
+  document.getElementById('tab-btn-export').style.display   = isAdmin?'':'none';
+  document.getElementById('tab-btn-accounts').style.display = isAdmin?'':'none';
+  document.getElementById('btn-save').style.display         = isAdmin?'':'none';
+
+  // 근무표 탭 편집 버튼 제어
+  document.getElementById('btn-auto-schedule').style.display = isAdmin?'':'none';
+  document.getElementById('btn-clear-schedule').style.display= isAdmin?'':'none';
+  document.getElementById('btn-export-link').style.display   = isAdmin?'':'none';
+  document.getElementById('sched-hint').textContent =
+    isAdmin ? '셀 클릭 → 근무 변경' : '📋 조회 전용 (편집 불가)';
+
+  if(isAdmin){
+    showTab('staff');
+  } else {
+    // 일반 사용자: 근무표 탭으로 바로 이동
+    document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active'));
+    document.getElementById('tab-schedule').classList.add('active');
+    document.getElementById('tab-btn-schedule').classList.add('active');
+    renderScheduleGrid();
+  }
+}
+
+function doLogout(){
+  currentUser = null;
+  window._scheduleReadOnly = false;
+  document.getElementById('auth-username').value='';
+  document.getElementById('auth-password').value='';
+  document.getElementById('auth-error').style.display='none';
+  document.getElementById('auth-overlay').style.display='flex';
+}
+
+function showAuthErr(el, msg){ el.textContent=msg; el.style.display='block'; }
+
+// ── 비밀번호 변경 ──────────────────────────────────────
+function showPwModal(){
+  document.getElementById('pw-current').value='';
+  document.getElementById('pw-new').value='';
+  document.getElementById('pw-new2').value='';
+  document.getElementById('pw-error').style.display='none';
+  document.getElementById('pw-modal').classList.add('open');
+}
+function closePwModal(){ document.getElementById('pw-modal').classList.remove('open'); }
+document.getElementById('pw-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closePwModal();});
+
+function doChangePw(){
+  if(!currentUser) return;
+  const cur  = document.getElementById('pw-current').value;
+  const nw   = document.getElementById('pw-new').value;
+  const nw2  = document.getElementById('pw-new2').value;
+  const errEl= document.getElementById('pw-error');
+  errEl.style.display='none';
+  const auth = loadAuth();
+  const user = auth.users.find(u=>u.id===currentUser.id);
+  if(!user){ showAuthErr(errEl,'계정을 찾을 수 없어요'); return; }
+  if(user.passwordHash!==hashPw(cur)){ showAuthErr(errEl,'현재 비밀번호가 틀렸어요'); return; }
+  if(nw.length<4){ showAuthErr(errEl,'새 비밀번호는 4자 이상이어야 해요'); return; }
+  if(nw!==nw2){ showAuthErr(errEl,'새 비밀번호가 일치하지 않아요'); return; }
+  user.passwordHash = hashPw(nw);
+  saveAuth(auth);
+  closePwModal();
+  toast('비밀번호가 변경됐어요! ✅');
+}
+
+// ── 관리자: 계정 관리 ─────────────────────────────────
+function renderUserMgmt(){
+  const auth = loadAuth();
+  document.getElementById('user-list-tbody').innerHTML = auth.users.map(u=>`
+    <tr>
+      <td><strong>${u.displayName||u.username}</strong></td>
+      <td style="color:#64748b">${u.username}</td>
+      <td><span class="role-badge ${u.role==='admin'?'role-admin':'role-user'}">${u.role==='admin'?'관리자':'일반'}</span></td>
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-gray" style="padding:3px 9px;font-size:11px" onclick="resetUserPw('${u.id}')">비번 초기화</button>
+        ${u.id!==currentUser?.id
+          ? `<button class="btn btn-red" style="padding:3px 9px;font-size:11px" onclick="deleteUser('${u.id}')">삭제</button>`
+          : '<span style="font-size:11px;color:#94a3b8">(본인)</span>'}
+      </td>
+    </tr>`).join('');
+}
+
+function addUser(){
+  const username   = document.getElementById('new-username').value.trim();
+  const dispName   = document.getElementById('new-displayname').value.trim()||username;
+  const pw         = document.getElementById('new-password').value;
+  const role       = document.getElementById('new-role').value;
+  if(!username||!pw){ toast('아이디와 비밀번호를 입력해주세요'); return; }
+  if(pw.length<4){ toast('비밀번호는 4자 이상이어야 해요'); return; }
+  const auth = loadAuth();
+  if(auth.users.some(u=>u.username===username)){ toast('이미 있는 아이디예요'); return; }
+  auth.users.push({id:uid(), username, displayName:dispName, passwordHash:hashPw(pw), role});
+  saveAuth(auth);
+  document.getElementById('new-username').value='';
+  document.getElementById('new-displayname').value='';
+  document.getElementById('new-password').value='';
+  renderUserMgmt();
+  toast(`✅ ${dispName} 계정이 추가됐어요!`);
+}
+
+function resetUserPw(userId){
+  const newPw = prompt('새 비밀번호를 입력하세요 (4자 이상):');
+  if(!newPw){ return; }
+  if(newPw.length<4){ toast('비밀번호는 4자 이상이어야 해요'); return; }
+  const auth = loadAuth();
+  const user = auth.users.find(u=>u.id===userId);
+  if(user){ user.passwordHash=hashPw(newPw); saveAuth(auth); toast(`🔑 ${user.displayName||user.username}의 비밀번호가 초기화됐어요`); }
+}
+
+function deleteUser(userId){
+  if(!confirm('이 계정을 삭제할까요?')) return;
+  const auth = loadAuth();
+  auth.users = auth.users.filter(u=>u.id!==userId);
+  saveAuth(auth);
+  renderUserMgmt();
+  toast('계정이 삭제됐어요');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════════
 function init(){
@@ -1146,6 +1451,8 @@ function init(){
   document.getElementById('min-D').value=state.minStaff.D;
   document.getElementById('min-E').value=state.minStaff.E;
   document.getElementById('min-N').value=state.minStaff.N;
+  // Auth — 로그인 화면 표시
+  initAuth();
 }
 init();
 </script>
