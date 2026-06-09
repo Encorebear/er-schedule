@@ -2,8 +2,17 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🏥 응급실 근무표</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>응급실 근무표</title>
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1e40af">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ER근무표">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="description" content="응급실 간호사 근무표 자동 생성 및 관리">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:#f0f4f8;color:#1e293b;min-height:100vh}
@@ -126,6 +135,38 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 
 /* ── EXPORT ── */
 .export-preview{background:#f8fafc;border-radius:8px;padding:12px;font-size:12px;color:#475569;line-height:1.8}
+
+/* ── MOBILE RESPONSIVE ── */
+@media(max-width:600px){
+  header{padding:0 10px;gap:8px;height:52px;flex-wrap:nowrap}
+  header h1{font-size:13px}
+  .tab-nav{gap:1px}
+  .tab-btn{padding:5px 9px;font-size:12px}
+  .header-right{gap:4px}
+  .btn-sm{padding:4px 8px;font-size:11px}
+  #header-user{display:none} /* 모바일에서 이름 숨김 */
+  .tab-content{padding:10px 8px}
+  .card{padding:12px}
+  .form-row{flex-direction:column}
+  .form-row .field{min-width:0;width:100%}
+  .btn-xl{padding:10px 16px;font-size:14px}
+  .auth-box{padding:28px 20px}
+  .auth-box h2{font-size:19px}
+  .two-col{grid-template-columns:1fr!important}
+  /* 근무표 그리드 터치 최적화 */
+  .day-cell{width:30px;min-width:30px;height:30px}
+  .grid-wrap{-webkit-overflow-scrolling:touch}
+  /* 스케줄 탭 상단 버튼 */
+  #btn-auto-schedule{font-size:13px;padding:9px 14px}
+  /* 히스토리 */
+  .hist-item{flex-wrap:wrap;gap:6px}
+  .hist-item > div:last-child{width:100%;justify-content:flex-end}
+  /* 계정 관리 */
+  .user-table td,.user-table th{padding:7px 8px;font-size:12px}
+}
+/* Safe area for notch phones */
+header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px, env(safe-area-inset-right))}
+.tab-content{padding-bottom:max(16px, env(safe-area-inset-bottom))}
 
 /* ── HISTORY ── */
 .hist-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;margin-bottom:8px;background:#fafafa;transition:.15s}
@@ -1585,6 +1626,14 @@ function init(){
   initAuth();
 }
 init();
+
+// ── Service Worker 등록 (PWA 오프라인 지원) ──
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .catch(()=>{}); // 등록 실패해도 앱 정상 동작
+  });
+}
 </script>
 </body>
 </html>

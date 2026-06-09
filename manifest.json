@@ -1,0 +1,21 @@
+{
+  "name": "응급실 근무표",
+  "short_name": "ER근무표",
+  "description": "응급실 간호사 근무표 자동 생성 및 관리",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1e40af",
+  "theme_color": "#1e40af",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["productivity", "medical"]
+}
