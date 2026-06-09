@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏥 응급실 근무표</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR','Apple SD Gothic Neo',sans-serif;background:#f0f4f8;color:#1e293b;min-height:100vh}
+:root{
+  --blue:#3b82f6;--blue-d:#1d4ed8;--green:#10b981;--purple:#8b5cf6;
+  --gray:#94a3b8;--orange:#f97316;--red:#ef4444;--pink:#ec4899;
+  --teal:#14b8a6;--yellow:#eab308;--sky:#0ea5e9;
+  --card:#ffffff;--border:#e2e8f0;--text:#1e293b;--sub:#64748b;
+}
+
+/* ── HEADER ── */
+header{background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;padding:0 20px;display:flex;align-items:center;gap:16px;height:56px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+header h1{font-size:16px;font-weight:700;white-space:nowrap}
+.tab-nav{display:flex;gap:2px;flex:1;overflow-x:auto}
+.tab-btn{background:rgba(255,255,255,.15);border:none;color:rgba(255,255,255,.8);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;white-space:nowrap;transition:.2s}
+.tab-btn.active,.tab-btn:hover{background:rgba(255,255,255,.3);color:#fff}
+.header-right{display:flex;gap:8px;align-items:center;white-space:nowrap}
+.btn-sm{padding:5px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600}
+.btn-primary{background:#fff;color:#1d4ed8}.btn-danger{background:#fee2e2;color:#dc2626}
+.btn-success{background:#dcfce7;color:#16a34a}.btn-warn{background:#fef3c7;color:#d97706}
+
+/* ── LAYOUT ── */
+.tab-content{display:none;padding:16px;max-width:1600px;margin:0 auto}
+.tab-content.active{display:block}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:16px;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:700;color:#1e40af;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.two-col{grid-template-columns:1fr}}
+
+/* ── FORMS ── */
+label{font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:4px}
+input,select{width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;outline:none;transition:.2s;background:#fff}
+input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.form-row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.form-row .field{flex:1;min-width:120px}
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;transition:.2s;display:inline-flex;align-items:center;gap:6px}
+.btn-blue{background:#3b82f6;color:#fff}.btn-blue:hover{background:#2563eb}
+.btn-gray{background:#f1f5f9;color:#475569}.btn-gray:hover{background:#e2e8f0}
+.btn-red{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}.btn-red:hover{background:#fee2e2}
+.btn-green{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}.btn-green:hover{background:#dcfce7}
+.btn-purple{background:#6d28d9;color:#fff}.btn-purple:hover{background:#5b21b6}
+.btn-xl{padding:12px 24px;font-size:15px;border-radius:10px}
+
+/* ── STAFF TABLE ── */
+.staff-table{width:100%;border-collapse:collapse;font-size:13px}
+.staff-table th{background:#f8fafc;padding:8px 12px;text-align:left;font-size:11px;color:#64748b;font-weight:600;border-bottom:2px solid #e2e8f0}
+.staff-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.staff-table tr:hover td{background:#f8fafc}
+.group-badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700}
+.g1{background:#dbeafe;color:#1d4ed8}.g2{background:#dcfce7;color:#16a34a}.g3{background:#fde8ff;color:#9333ea}
+
+/* ── SCHEDULE GRID ── */
+.grid-wrap{overflow:auto;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);background:#fff}
+.sched-table{border-collapse:collapse;font-size:12px;min-width:max-content}
+.sched-table th,.sched-table td{border:1px solid #e2e8f0;padding:0;text-align:center;white-space:nowrap}
+.sched-table th{background:#f8fafc;font-weight:600;font-size:11px;padding:6px 8px;color:#475569;position:sticky;top:0;z-index:10}
+.sched-table .col-name{position:sticky;left:0;z-index:20;background:#f8fafc;font-weight:700;color:#1e293b;min-width:80px;padding:0 8px}
+.sched-table .col-group{position:sticky;left:80px;z-index:20;background:#f8fafc;min-width:44px}
+.sched-table .col-prev{position:sticky;left:124px;z-index:20;background:#f8fafc;min-width:44px}
+.sched-table tr:hover .col-name,.sched-table tr:hover .col-group,.sched-table tr:hover .col-prev{background:#eff6ff}
+.day-cell{width:34px;min-width:34px;height:32px;cursor:pointer;position:relative;transition:.15s}
+.day-cell:hover{filter:brightness(1.1);transform:scale(1.05);z-index:5}
+.day-cell.sun{background:#fff1f2!important}
+.day-cell.sat{background:#eff6ff!important}
+.day-cell.holiday{background:#fef9c3!important}
+.shift-D{background:#dbeafe;color:#1d4ed8}
+.shift-E{background:#d1fae5;color:#065f46}
+.shift-N{background:#ede9fe;color:#5b21b6}
+.shift-OFF{background:#f1f5f9;color:#64748b}
+.shift-주{background:#fef9c3;color:#92400e}
+.shift-VAC{background:#fff7ed;color:#c2410c}
+.shift-법{background:#fee2e2;color:#991b1b}
+.shift-생휴{background:#fce7f3;color:#9d174d}
+.shift-수면{background:#ccfbf1;color:#0f766e}
+.shift-중{background:#e0e7ff;color:#3730a3}
+
+/* 집계 행 */
+.sum-row td{background:#f8fafc;font-weight:700;font-size:11px;color:#1e40af}
+.sum-row.d-row td{background:#eff6ff;color:#1d4ed8}
+.sum-row.e-row td{background:#f0fdf4;color:#065f46}
+.sum-row.n-row td{background:#f5f3ff;color:#5b21b6}
+.warn-cell{background:#fee2e2!important;color:#dc2626!important;font-weight:800}
+
+/* 날짜 헤더 */
+.day-head{min-width:34px;width:34px;font-size:11px}
+.day-head.sun{color:#ef4444}.day-head.sat{color:#3b82f6}.day-head.holi{background:#fef9c3}
+
+/* ── LEAVE PANEL ── */
+.leave-list{display:flex;flex-direction:column;gap:6px}
+.leave-item{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8fafc;border-radius:8px;font-size:12px}
+.leave-item span{flex:1}
+.leave-badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}
+
+/* ── LEGEND ── */
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.leg-item{display:flex;align-items:center;gap:4px;font-size:11px}
+.leg-dot{width:20px;height:20px;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:700}
+
+/* ── STAT CARDS ── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin:8px 0}
+.stat-card{text-align:center;background:#f8fafc;border-radius:8px;padding:10px 8px}
+.stat-card .val{font-size:22px;font-weight:800;color:#1e40af}
+.stat-card .lbl{font-size:10px;color:#64748b;margin-top:2px}
+
+/* ── MODAL ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;place-items:center;z-index:1000}
+.modal-bg.open{display:grid}
+.modal{background:#fff;border-radius:16px;padding:24px;width:90%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:16px;color:#1e40af}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.field-group{margin-bottom:12px}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;display:none;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+
+/* ── PERIOD SETTINGS ── */
+.holi-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.holi-tag{background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:20px;font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer}
+.holi-tag:hover{background:#fecaca}
+
+/* ── EXPORT ── */
+.export-preview{background:#f8fafc;border-radius:8px;padding:12px;font-size:12px;color:#475569;line-height:1.8}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏥 응급실 근무표</h1>
+  <nav class="tab-nav">
+    <button class="tab-btn active" onclick="showTab('staff')">👥 직원 관리</button>
+    <button class="tab-btn" onclick="showTab('period')">📅 기간 설정</button>
+    <button class="tab-btn" onclick="showTab('schedule')">📋 근무표</button>
+    <button class="tab-btn" onclick="showTab('export')">📤 엑셀 출력</button>
+  </nav>
+  <div class="header-right">
+    <button class="btn-sm btn-primary" onclick="saveState()">💾 저장</button>
+  </div>
+</header>
+
+<!-- ══ TAB 1: 직원 관리 ══════════════════════════════════════════════════ -->
+<div id="tab-staff" class="tab-content active">
+  <div class="two-col">
+    <div>
+      <div class="card">
+        <div class="card-title">👤 직원 추가</div>
+        <div class="form-row">
+          <div class="field"><label>이름</label><input id="inp-name" placeholder="이름 입력" onkeydown="if(event.key==='Enter')addStaff()"></div>
+          <div class="field" style="max-width:120px"><label>그룹(직급)</label>
+            <select id="inp-group">
+              <option value="1">1그룹</option>
+              <option value="2">2그룹</option>
+              <option value="3">3그룹</option>
+            </select>
+          </div>
+          <div class="field" style="max-width:120px"><label>전 근무</label>
+            <select id="inp-prev">
+              <option value="">없음</option>
+              <option value="D">D</option><option value="E">E</option>
+              <option value="N">N</option><option value="OFF">OFF</option>
+              <option value="주">주</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button class="btn btn-blue" style="flex:1" onclick="addStaff()">+ 직원 추가</button>
+          <button class="btn btn-gray" onclick="importSampleStaff()">📋 샘플 불러오기</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">📊 그룹 현황</div>
+        <div id="group-stats" class="stat-grid"></div>
+      </div>
+    </div>
+    <div class="card" style="min-height:200px">
+      <div class="card-title" style="justify-content:space-between">
+        <span>👥 직원 목록 (<span id="staff-count">0</span>명)</span>
+        <button class="btn btn-red" style="padding:3px 10px;font-size:11px" onclick="if(confirm('전체 삭제?'))clearStaff()">전체 삭제</button>
+      </div>
+      <table class="staff-table">
+        <thead><tr><th>#</th><th>이름</th><th>그룹</th><th>전근무</th><th></th></tr></thead>
+        <tbody id="staff-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TAB 2: 기간 설정 ══════════════════════════════════════════════════ -->
+<div id="tab-period" class="tab-content">
+  <div class="two-col">
+    <div>
+      <div class="card">
+        <div class="card-title">📅 근무 기간</div>
+        <div class="field-group"><label>시작일</label><input type="date" id="inp-start" value="2024-09-15" onchange="updatePeriod()"></div>
+        <div class="field-group"><label>기간 (일수)</label>
+          <select id="inp-days" onchange="updatePeriod()">
+            <option value="28">28일 (4주)</option>
+            <option value="29">29일</option>
+            <option value="30">30일</option>
+            <option value="31">31일</option>
+          </select>
+        </div>
+        <div class="field-group"><label>하루 최소 인원</label>
+          <div class="form-row">
+            <div class="field"><label style="color:#1d4ed8">D (주간)</label><input type="number" id="min-D" value="6" min="1"></div>
+            <div class="field"><label style="color:#065f46">E (저녁)</label><input type="number" id="min-E" value="7" min="1"></div>
+            <div class="field"><label style="color:#5b21b6">N (야간)</label><input type="number" id="min-N" value="6" min="1"></div>
+          </div>
+        </div>
+        <div id="period-summary" style="margin-top:10px;font-size:12px;color:#475569;line-height:1.8"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">📌 공휴일 / 특수일 설정</div>
+        <div class="form-row">
+          <div class="field"><input type="date" id="inp-holi-date"></div>
+          <div class="field" style="max-width:120px">
+            <select id="inp-holi-type">
+              <option value="법">법 (법정공휴일)</option>
+              <option value="특">특수일 표시</option>
+            </select>
+          </div>
+          <div class="field" style="max-width:100px">
+            <input id="inp-holi-label" placeholder="라벨(선택)">
+          </div>
+          <button class="btn btn-blue" onclick="addHoliday()">추가</button>
+        </div>
+        <div class="holi-list" id="holi-list" style="margin-top:10px"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏖️ 직원별 휴가/특수근무 입력</div>
+      <div class="form-row" style="margin-bottom:10px">
+        <div class="field">
+          <label>직원</label>
+          <select id="leave-staff"></select>
+        </div>
+        <div class="field">
+          <label>날짜</label>
+          <input type="date" id="leave-date">
+        </div>
+        <div class="field" style="max-width:110px">
+          <label>종류</label>
+          <select id="leave-type">
+            <option value="VAC">VAC (연차)</option>
+            <option value="생휴">생휴</option>
+            <option value="법">법 (공휴일)</option>
+            <option value="수면">수면오프</option>
+            <option value="병가">병가</option>
+            <option value="OFF">OFF</option>
+            <option value="주">주휴</option>
+          </select>
+        </div>
+        <button class="btn btn-blue" onclick="addLeave()">추가</button>
+      </div>
+      <div id="leave-list" class="leave-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TAB 3: 근무표 ══════════════════════════════════════════════════════ -->
+<div id="tab-schedule" class="tab-content">
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-purple btn-xl" onclick="runAutoSchedule()">⚡ 자동 근무표 생성</button>
+      <button class="btn btn-gray" onclick="clearSchedule()">🗑️ 초기화</button>
+      <button class="btn btn-green" onclick="showTab('export')">📤 엑셀 출력</button>
+      <span style="font-size:12px;color:#64748b">셀 클릭 → 근무 변경</span>
+      <span id="gen-status" style="font-size:12px;color:#16a34a;font-weight:600"></span>
+    </div>
+    <div class="legend" style="margin-top:8px">
+      <div class="leg-item"><div class="leg-dot shift-D">D</div><span>주간</span></div>
+      <div class="leg-item"><div class="leg-dot shift-E">E</div><span>저녁</span></div>
+      <div class="leg-item"><div class="leg-dot shift-N">N</div><span>야간</span></div>
+      <div class="leg-item"><div class="leg-dot shift-OFF">○</div><span>OFF</span></div>
+      <div class="leg-item"><div class="leg-dot shift-주">주</div><span>주휴</span></div>
+      <div class="leg-item"><div class="leg-dot shift-VAC">V</div><span>연차</span></div>
+      <div class="leg-item"><div class="leg-dot shift-법">법</div><span>공휴</span></div>
+      <div class="leg-item"><div class="leg-dot shift-생휴">생</div><span>생휴</span></div>
+      <div class="leg-item"><div class="leg-dot shift-수면">수</div><span>수면</span></div>
+    </div>
+  </div>
+  <div class="grid-wrap">
+    <div id="schedule-grid"></div>
+  </div>
+</div>
+
+<!-- ══ TAB 4: 엑셀 출력 ══════════════════════════════════════════════════ -->
+<div id="tab-export" class="tab-content">
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">📤 엑셀 파일 출력</div>
+      <div class="export-preview">
+        ✅ 출력 내용:<br>
+        - 헤더: 기간, 간호사 수<br>
+        - 직원별 28일 근무 배치 (D/E/N/OFF/주/VAC/법/생휴/수면)<br>
+        - 일별 집계 (D/E/N 인원수, 목표 대비 경고)<br>
+        - 그룹별 집계 (1그룹/2그룹/3그룹 D/E/N 분포)<br>
+        - 직원별 요약 (총 OFF, N 횟수, 주별 주/OFF, 각종 휴가 합계)<br>
+        <br>※ 원본 파일 양식과 동일하게 출력됩니다
+      </div>
+      <button class="btn btn-blue btn-xl" style="margin-top:14px;width:100%" onclick="exportToExcel()">
+        📥 엑셀 다운로드 (.xlsx)
+      </button>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 현재 근무표 요약</div>
+      <div id="export-summary"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CELL EDIT MODAL ══ -->
+<div class="modal-bg" id="cell-modal">
+  <div class="modal">
+    <h3 id="modal-title">근무 변경</h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px" id="shift-picker"></div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeModal()">취소</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════
+const SHIFTS = ['D','E','N','OFF','주','VAC','법','생휴','수면','중','병가'];
+const REST_TYPES = new Set(['OFF','주','VAC','법','생휴','수면','병가']);
+const SHIFT_LABELS = {D:'주간',E:'저녁',N:'야간',OFF:'오프',주:'주휴',VAC:'연차',법:'공휴',생휴:'생휴',수면:'수면',중:'중간',병가:'병가'};
+
+let state = {
+  staff: [],        // [{id, name, group, prevShift}]
+  period: { start: '2024-09-15', days: 28 },
+  minStaff: { D: 6, E: 7, N: 6 },
+  holidays: [],     // [{date:'2024-09-16', type:'법', label:'추석'}]
+  leaves: {},       // staffId -> [{date, type}]
+  schedule: {},     // staffId -> [shift|null] length=days
+};
+
+let _modalStaffId = null, _modalDayIdx = null;
+
+// ═══════════════════════════════════════════════════════════════════
+//  PERSISTENCE
+// ═══════════════════════════════════════════════════════════════════
+function saveState(silent=false){
+  localStorage.setItem('er_schedule_v1', JSON.stringify(state));
+  if(!silent) toast('저장됐어요!');
+}
+function loadState(){
+  try{
+    const raw = localStorage.getItem('er_schedule_v1');
+    if(raw) state = JSON.parse(raw);
+  }catch(e){}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════════════════════════
+function uid(){ return '_'+Math.random().toString(36).slice(2,9); }
+function toast(msg, dur=2000){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.style.display='block';
+  clearTimeout(el._t); el._t=setTimeout(()=>el.style.display='none',dur);
+}
+function showTab(name){
+  document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b=>{
+    if(b.textContent.toLowerCase().includes(name==='staff'?'직원':name==='period'?'기간':name==='schedule'?'근무표':name==='export'?'엑셀':''))
+      b.classList.add('active');
+  });
+  if(name==='schedule') renderScheduleGrid();
+  if(name==='period'){ updatePeriodSummary(); renderLeaveList(); updateLeaveStaffSelect(); }
+  if(name==='export') renderExportSummary();
+}
+function getDate(d){ return new Date(d+'T00:00:00'); }
+function addDays(dateStr,n){ const d=getDate(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function fmtDate(dateStr){ const d=getDate(dateStr); return `${d.getMonth()+1}/${d.getDate()}`; }
+function dayOfWeek(dateStr){ return getDate(dateStr).getDay(); }
+function DOW_KR(n){ return ['일','월','화','수','목','금','토'][n]; }
+
+function isHoliday(dateStr){ return state.holidays.some(h=>h.date===dateStr); }
+function getHoliday(dateStr){ return state.holidays.find(h=>h.date===dateStr); }
+function getLeave(staffId, dayIdx){
+  const date = addDays(state.period.start, dayIdx);
+  const leaves = state.leaves[staffId]||[];
+  const lv = leaves.find(l=>l.date===date);
+  return lv ? lv.type : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  STAFF MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════
+function addStaff(){
+  const name = document.getElementById('inp-name').value.trim();
+  const group = document.getElementById('inp-group').value;
+  const prevShift = document.getElementById('inp-prev').value;
+  if(!name){ toast('이름을 입력해주세요'); return; }
+  const id = uid();
+  state.staff.push({id, name, group, prevShift});
+  state.leaves[id] = [];
+  if(!state.schedule[id]) state.schedule[id] = new Array(state.period.days).fill(null);
+  document.getElementById('inp-name').value='';
+  renderStaffTable();
+  updateGroupStats();
+  saveState(true);
+  toast(`${name} 추가됐어요!`);
+}
+function removeStaff(id){
+  const s = state.staff.find(x=>x.id===id);
+  if(!confirm(`${s?.name} 삭제?`)) return;
+  state.staff = state.staff.filter(x=>x.id!==id);
+  delete state.leaves[id];
+  delete state.schedule[id];
+  renderStaffTable();
+  updateGroupStats();
+  saveState(true);
+}
+function clearStaff(){
+  state.staff=[];state.leaves={};state.schedule={};
+  renderStaffTable();updateGroupStats();saveState(true);
+}
+function importSampleStaff(){
+  if(state.staff.length>0&&!confirm('기존 직원 목록을 샘플로 교체할까요?')) return;
+  const samples=[
+    ['이경희','1'],['오선영','1'],['우영미','1'],['김현진','1'],
+    ['전상배','1'],['안일심','1'],['조은애','1'],['우혜린','1'],
+    ['유지연','2'],['서희정','2'],['노지애','2'],['전선영','2'],
+    ['차세미','2'],['이은지','2'],['박동희','2'],['김효선','2'],
+    ['김소원','2'],['최민정','2'],['한은애','2'],['이혜정','2'],
+    ['차승현','3'],['강라원','3'],['허란','3'],['윤예원','3'],
+    ['설희원','3'],['황지현','3'],['이유진','3'],['이창성','3'],
+    ['백지선','3'],['정진우','3'],['김민아','3'],['장미선','3'],
+  ];
+  state.staff=[];state.leaves={};state.schedule={};
+  samples.forEach(([name,group])=>{
+    const id=uid();
+    state.staff.push({id,name,group,prevShift:''});
+    state.leaves[id]=[];
+    state.schedule[id]=new Array(state.period.days).fill(null);
+  });
+  renderStaffTable();updateGroupStats();saveState(true);
+  toast(`${samples.length}명 불러왔어요!`);
+}
+function renderStaffTable(){
+  const tbody=document.getElementById('staff-tbody');
+  document.getElementById('staff-count').textContent=state.staff.length;
+  if(!state.staff.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px">직원이 없어요</td></tr>';return;}
+  tbody.innerHTML=state.staff.map((s,i)=>`
+    <tr>
+      <td style="color:#94a3b8;font-size:11px">${i+1}</td>
+      <td style="font-weight:600">${s.name}</td>
+      <td><span class="group-badge g${s.group}">${s.group}그룹</span></td>
+      <td><span style="font-size:11px;color:#64748b">${s.prevShift||'-'}</span></td>
+      <td>
+        <button class="btn btn-gray" style="padding:2px 8px;font-size:11px" onclick="editStaffRow('${s.id}')">수정</button>
+        <button class="btn btn-red" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="removeStaff('${s.id}')">삭제</button>
+      </td>
+    </tr>`).join('');
+}
+function editStaffRow(id){
+  const s=state.staff.find(x=>x.id===id);
+  if(!s)return;
+  const name=prompt('이름 변경 (현재: '+s.name+')',s.name);
+  if(!name)return;
+  s.name=name.trim();
+  renderStaffTable();saveState(true);
+}
+function updateGroupStats(){
+  const counts={1:0,2:0,3:0};
+  state.staff.forEach(s=>counts[s.group]=(counts[s.group]||0)+1);
+  document.getElementById('group-stats').innerHTML=
+    Object.entries(counts).map(([g,c])=>`
+      <div class="stat-card"><div class="val g${g}" style="font-size:20px">${c}</div><div class="lbl">${g}그룹</div></div>
+    `).join('')+
+    `<div class="stat-card"><div class="val">${state.staff.length}</div><div class="lbl">전체</div></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PERIOD & HOLIDAYS
+// ═══════════════════════════════════════════════════════════════════
+function updatePeriod(){
+  state.period.start=document.getElementById('inp-start').value;
+  state.period.days=parseInt(document.getElementById('inp-days').value);
+  state.minStaff.D=parseInt(document.getElementById('min-D').value)||6;
+  state.minStaff.E=parseInt(document.getElementById('min-E').value)||7;
+  state.minStaff.N=parseInt(document.getElementById('min-N').value)||6;
+  // resize schedule arrays
+  state.staff.forEach(s=>{
+    const cur=state.schedule[s.id]||[];
+    if(cur.length<state.period.days){
+      state.schedule[s.id]=[...cur,...new Array(state.period.days-cur.length).fill(null)];
+    } else {
+      state.schedule[s.id]=cur.slice(0,state.period.days);
+    }
+  });
+  updatePeriodSummary();saveState(true);
+}
+function updatePeriodSummary(){
+  const {start,days}=state.period;
+  const end=addDays(start,days-1);
+  document.getElementById('period-summary').innerHTML=
+    `📅 기간: ${start} ~ ${end} (${days}일 / ${Math.floor(days/7)}주 ${days%7}일 남음)<br>
+     👥 직원 ${state.staff.length}명 | 공휴일 ${state.holidays.length}건`;
+}
+function addHoliday(){
+  const date=document.getElementById('inp-holi-date').value;
+  const type=document.getElementById('inp-holi-type').value;
+  const label=document.getElementById('inp-holi-label').value.trim();
+  if(!date){toast('날짜를 선택해주세요');return;}
+  if(state.holidays.some(h=>h.date===date)){
+    state.holidays=state.holidays.filter(h=>h.date!==date);
+  }
+  state.holidays.push({date,type,label:label||type});
+  state.holidays.sort((a,b)=>a.date.localeCompare(b.date));
+  renderHolidays();saveState(true);
+}
+function removeHoliday(date){
+  state.holidays=state.holidays.filter(h=>h.date!==date);
+  renderHolidays();saveState(true);
+}
+function renderHolidays(){
+  const el=document.getElementById('holi-list');
+  if(!state.holidays.length){el.innerHTML='<span style="color:#94a3b8;font-size:12px">없음</span>';return;}
+  el.innerHTML=state.holidays.map(h=>
+    `<span class="holi-tag" onclick="removeHoliday('${h.date}')">
+      ${fmtDate(h.date)} ${h.label} ✕
+    </span>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LEAVES
+// ═══════════════════════════════════════════════════════════════════
+function updateLeaveStaffSelect(){
+  const sel=document.getElementById('leave-staff');
+  const cur=sel.value;
+  sel.innerHTML=state.staff.map(s=>
+    `<option value="${s.id}" ${s.id===cur?'selected':''}>${s.name} (${s.group}그룹)</option>`
+  ).join('');
+}
+function addLeave(){
+  const staffId=document.getElementById('leave-staff').value;
+  const date=document.getElementById('leave-date').value;
+  const type=document.getElementById('leave-type').value;
+  if(!staffId||!date){toast('직원과 날짜를 선택해주세요');return;}
+  if(!state.leaves[staffId]) state.leaves[staffId]=[];
+  state.leaves[staffId]=state.leaves[staffId].filter(l=>l.date!==date);
+  state.leaves[staffId].push({date,type});
+  state.leaves[staffId].sort((a,b)=>a.date.localeCompare(b.date));
+  renderLeaveList();saveState(true);
+  toast('휴가 추가됐어요!');
+}
+function removeLeave(staffId,date){
+  state.leaves[staffId]=(state.leaves[staffId]||[]).filter(l=>l.date!==date);
+  renderLeaveList();saveState(true);
+}
+function renderLeaveList(){
+  const el=document.getElementById('leave-list');
+  const allLeaves=[];
+  state.staff.forEach(s=>{
+    (state.leaves[s.id]||[]).forEach(l=>allLeaves.push({...l,staffName:s.name,staffId:s.id}));
+  });
+  allLeaves.sort((a,b)=>a.date.localeCompare(b.date));
+  if(!allLeaves.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;text-align:center;padding:12px">입력된 휴가 없음</div>';return;}
+  el.innerHTML=allLeaves.map(l=>
+    `<div class="leave-item">
+      <span class="leave-badge shift-${l.type}">${l.type}</span>
+      <span><b>${l.staffName}</b> · ${fmtDate(l.date)} (${DOW_KR(dayOfWeek(l.date))})</span>
+      <button class="btn btn-red" style="padding:2px 8px;font-size:11px" onclick="removeLeave('${l.staffId}','${l.date}')">✕</button>
+    </div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUTO SCHEDULER
+// ═══════════════════════════════════════════════════════════════════
+function runAutoSchedule(){
+  if(!state.staff.length){toast('직원이 없어요');return;}
+  const btn=document.querySelector('[onclick="runAutoSchedule()"]');
+  btn.disabled=true;btn.textContent='⏳ 생성 중...';
+  setTimeout(()=>{
+    try{
+      autoSchedule();
+      renderScheduleGrid();
+      saveState(true);
+      document.getElementById('gen-status').textContent='✅ 생성 완료!';
+      toast('근무표가 생성됐어요!',3000);
+    }catch(e){
+      console.error(e);toast('오류: '+e.message,4000);
+    }
+    btn.disabled=false;btn.textContent='⚡ 자동 근무표 생성';
+  },50);
+}
+
+function autoSchedule(){
+  const {staff,period,minStaff,holidays,leaves} = state;
+  const numDays = period.days;
+  const startDate = period.start;
+
+  // Initialize
+  const sched = {};
+  staff.forEach(s=>{ sched[s.id] = new Array(numDays).fill(null); });
+
+  // Step 1: Apply pre-entered leaves
+  staff.forEach(s=>{
+    (leaves[s.id]||[]).forEach(l=>{
+      const d = dateToDayIdx(l.date);
+      if(d>=0 && d<numDays) sched[s.id][d] = l.type;
+    });
+  });
+
+  // Step 2: Apply holidays to all unassigned
+  for(let d=0;d<numDays;d++){
+    const date = addDays(startDate,d);
+    const holi = getHoliday(date);
+    if(holi && holi.type==='법'){
+      staff.forEach(s=>{
+        if(!sched[s.id][d]) sched[s.id][d]='법';
+      });
+    }
+  }
+
+  // Step 3: Determine N-streak carryover from prevShift
+  // Track: nStreak[id] = how many consecutive N ending on day -1
+  //        pendingRest[id] = how many rest days still required (from pre-period N)
+  const nStreak = {};
+  const pendingRest = {};
+  staff.forEach(s=>{
+    nStreak[s.id] = s.prevShift==='N' ? 1 : 0;
+    pendingRest[s.id] = s.prevShift==='N' ? 1 : 0;
+    // N1 → 1 rest; N2+ → 2 rest. For 1 N before period, 1 rest required.
+  });
+
+  // Step 4: Day-by-day scheduling
+  // We'll do a 2-pass approach:
+  // Pass A: mark required rests (post-N), assign 주휴 weekly
+  // Pass B: fill D/E/N for remaining
+
+  // Track weekly주휴 given: weeklyRest[staffId][weekNum] = true
+  const lastRest = {}; // last day of 주휴 per person
+  staff.forEach(s=>{ lastRest[s.id]=-7; });
+
+  // Pass A: Handle N carryover rests
+  for(let d=0;d<numDays;d++){
+    staff.forEach(s=>{
+      const id=s.id;
+      if(pendingRest[id]>0 && !sched[id][d]){
+        sched[id][d]='OFF';
+        pendingRest[id]--;
+        nStreak[id]=0;
+      }
+    });
+  }
+
+  // Pass B: Assign 주휴 (one per 7 days)
+  for(let d=0;d<numDays;d++){
+    staff.forEach(s=>{
+      const id=s.id;
+      if(sched[id][d]) return; // already assigned
+      const daysSinceLast = d - lastRest[id];
+      if(daysSinceLast>=7){
+        // Try to assign 주휴 today
+        sched[id][d]='주';
+        lastRest[id]=d;
+      }
+    });
+  }
+
+  // Pass C: Assign N/D/E to meet daily minimums
+  // For each day, count current assignments, then fill gaps
+  for(let d=0;d<numDays;d++){
+    const date=addDays(startDate,d);
+    const isHoli=isHoliday(date)&&state.holidays.find(h=>h.date===date&&h.type==='법');
+    
+    // Count current
+    const count={D:0,E:0,N:0};
+    const available=[];
+    staff.forEach(s=>{
+      const sh=sched[s.id][d];
+      if(sh==='D'||sh==='E'||sh==='N') count[sh]++;
+      else if(!sh) available.push(s);
+    });
+
+    const needN=Math.max(0,minStaff.N-count.N);
+    const needD=Math.max(0,minStaff.D-count.D);
+    const needE=Math.max(0,minStaff.E-count.E);
+
+    if(!available.length) continue;
+
+    // Shuffle available with group balancing
+    const shuffled=groupBalancedShuffle(available);
+
+    let idx=0;
+    // Assign N
+    for(let i=0;i<needN&&idx<shuffled.length;i++,idx++){
+      const s=shuffled[idx];
+      sched[s.id][d]='N';
+      // Mark post-N rests
+      let streak = nStreak[s.id]+1;
+      nStreak[s.id]=streak;
+      const restNeeded = streak>=2 ? 2 : 1;
+      for(let r=1;r<=restNeeded&&(d+r)<numDays;r++){
+        if(!sched[s.id][d+r]){
+          sched[s.id][d+r] = r===2&&lastRest[s.id]<d+r-7 ? '주' : 'OFF';
+          if(sched[s.id][d+r]==='주') lastRest[s.id]=d+r;
+          // Enforce max 3N: also block further N
+        }
+      }
+    }
+    // Assign D
+    for(let i=0;i<needD&&idx<shuffled.length;i++,idx++){
+      sched[shuffled[idx].id][d]='D';
+      nStreak[shuffled[idx].id]=0;
+    }
+    // Assign E
+    for(let i=0;i<needE&&idx<shuffled.length;i++,idx++){
+      sched[shuffled[idx].id][d]='E';
+      nStreak[shuffled[idx].id]=0;
+    }
+    // Remaining → OFF (or more E if available)
+    for(;idx<shuffled.length;idx++){
+      const s=shuffled[idx];
+      if(!sched[s.id][d]){
+        // give more E if under-staffed from other cause, else OFF
+        sched[s.id][d]='OFF';
+        nStreak[s.id]=0;
+      }
+    }
+  }
+
+  // Pass D: Recalc nStreak sequentially to fix post-N overlaps
+  // Also enforce: max 3 consecutive N
+  staff.forEach(s=>{
+    let streak=s.prevShift==='N'?1:0;
+    for(let d=0;d<numDays;d++){
+      const sh=sched[s.id][d];
+      if(sh==='N'){
+        streak++;
+        if(streak>3){
+          // Force OFF
+          sched[s.id][d]='OFF';
+          streak=0;
+        }
+      } else {
+        if(REST_TYPES.has(sh)||sh===null) {
+          // resting
+        }
+        streak=sh==='N'?1:0;
+      }
+    }
+  });
+
+  // Pass E: Fill remaining nulls
+  staff.forEach(s=>{
+    for(let d=0;d<numDays;d++){
+      if(!sched[s.id][d]) sched[s.id][d]='OFF';
+    }
+  });
+
+  state.schedule=sched;
+}
+
+function dateToDayIdx(dateStr){
+  const start=getDate(state.period.start);
+  const target=getDate(dateStr);
+  return Math.round((target-start)/(1000*60*60*24));
+}
+
+function groupBalancedShuffle(staffList){
+  // Group by group number, then interleave
+  const groups={};
+  staffList.forEach(s=>{
+    if(!groups[s.group]) groups[s.group]=[];
+    groups[s.group].push(s);
+  });
+  // Shuffle each group
+  Object.values(groups).forEach(g=>{
+    for(let i=g.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [g[i],g[j]]=[g[j],g[i]];
+    }
+  });
+  // Interleave groups
+  const keys=Object.keys(groups).sort();
+  const result=[];
+  let added=true;
+  while(added){
+    added=false;
+    keys.forEach(k=>{
+      if(groups[k].length){result.push(groups[k].shift());added=true;}
+    });
+  }
+  return result;
+}
+
+function clearSchedule(){
+  if(!confirm('근무표를 초기화할까요?')) return;
+  state.staff.forEach(s=>{ state.schedule[s.id]=new Array(state.period.days).fill(null); });
+  renderScheduleGrid();saveState(true);toast('초기화됐어요!');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SCHEDULE GRID RENDER
+// ═══════════════════════════════════════════════════════════════════
+function renderScheduleGrid(){
+  const {staff,period,schedule,minStaff} = state;
+  const numDays=period.days;
+  const startDate=period.start;
+  if(!staff.length){
+    document.getElementById('schedule-grid').innerHTML='<div style="padding:40px;text-align:center;color:#94a3b8">직원을 먼저 등록해주세요</div>';
+    return;
+  }
+
+  // Build header rows
+  const headerRow1=`<tr>
+    <th class="col-name" rowspan="2">이름</th>
+    <th class="col-group" rowspan="2">그룹</th>
+    <th class="col-prev" rowspan="2">전근무</th>
+    ${Array.from({length:numDays},(_,d)=>{
+      const date=addDays(startDate,d);
+      const dow=dayOfWeek(date);
+      const holi=getHoliday(date);
+      const cls='day-head'+(dow===0?' sun':dow===6?' sat':'')+(holi?' holi':'');
+      return `<th class="${cls}">${fmtDate(date)}</th>`;
+    }).join('')}
+    <th style="background:#f0f7ff;color:#1d4ed8;font-size:10px;min-width:36px">OFF</th>
+    <th style="background:#f5f3ff;color:#5b21b6;font-size:10px;min-width:36px">N수</th>
+  </tr>`;
+  const headerRow2=`<tr>
+    ${Array.from({length:numDays},(_,d)=>{
+      const date=addDays(startDate,d);
+      const dow=dayOfWeek(date);
+      const holi=getHoliday(date);
+      const cls='day-head'+(dow===0?' sun':dow===6?' sat':'')+(holi?' holi':'');
+      return `<th class="${cls}">${DOW_KR(dow)}</th>`;
+    }).join('')}
+    <th></th><th></th>
+  </tr>`;
+
+  // Daily counts
+  const dayCounts={};
+  for(let d=0;d<numDays;d++){
+    const date=addDays(startDate,d);
+    dayCounts[d]={D:0,E:0,N:0,total:0};
+    staff.forEach(s=>{
+      const sh=schedule[s.id]?.[d];
+      if(sh==='D') dayCounts[d].D++;
+      else if(sh==='E') dayCounts[d].E++;
+      else if(sh==='N') dayCounts[d].N++;
+    });
+  }
+
+  // Staff rows
+  const staffRows=staff.map(s=>{
+    const sched=schedule[s.id]||[];
+    let offCount=0,nCount=0;
+    const cells=Array.from({length:numDays},(_,d)=>{
+      const sh=sched[d]||'';
+      const date=addDays(startDate,d);
+      const dow=dayOfWeek(date);
+      const holi=getHoliday(date);
+      let cellCls=`day-cell shift-${sh||'OFF'}`;
+      if(dow===0) cellCls+=' sun';
+      if(dow===6) cellCls+=' sat';
+      if(holi) cellCls+=' holiday';
+      const label=sh||'';
+      const disp=sh==='OFF'?'○':sh==='주'?'주':sh==='수면'?'수':sh==='생휴'?'생':sh==='VAC'?'V':sh;
+      if(REST_TYPES.has(sh)||!sh) offCount++;
+      if(sh==='N') nCount++;
+      return `<td class="${cellCls}" onclick="openCellModal('${s.id}',${d})" title="${fmtDate(date)} ${sh||'미배정'}">${disp}</td>`;
+    }).join('');
+    const restCount=sched.filter(sh=>REST_TYPES.has(sh)).length;
+    return `<tr>
+      <td class="col-name">${s.name}</td>
+      <td class="col-group"><span class="group-badge g${s.group}">${s.group}</span></td>
+      <td class="col-prev" style="font-size:11px;color:#64748b">${s.prevShift||'-'}</td>
+      ${cells}
+      <td style="font-size:11px;font-weight:700;color:#64748b">${restCount}</td>
+      <td style="font-size:11px;font-weight:700;color:#5b21b6">${nCount}</td>
+    </tr>`;
+  }).join('');
+
+  // Aggregate rows
+  const aggD='<tr class="sum-row d-row"><td class="col-name" style="font-size:11px">D 합계</td><td class="col-group"></td><td class="col-prev"></td>'+
+    Array.from({length:numDays},(_,d)=>{
+      const v=dayCounts[d].D;
+      const warn=v<minStaff.D;
+      return `<td class="${warn?'warn-cell':''}">${v}</td>`;
+    }).join('')+'<td></td><td></td></tr>';
+  const aggE='<tr class="sum-row e-row"><td class="col-name" style="font-size:11px">E 합계</td><td class="col-group"></td><td class="col-prev"></td>'+
+    Array.from({length:numDays},(_,d)=>{
+      const v=dayCounts[d].E;
+      const warn=v<minStaff.E;
+      return `<td class="${warn?'warn-cell':''}">${v}</td>`;
+    }).join('')+'<td></td><td></td></tr>';
+  const aggN='<tr class="sum-row n-row"><td class="col-name" style="font-size:11px">N 합계</td><td class="col-group"></td><td class="col-prev"></td>'+
+    Array.from({length:numDays},(_,d)=>{
+      const v=dayCounts[d].N;
+      const warn=v<minStaff.N;
+      return `<td class="${warn?'warn-cell':''}">${v}</td>`;
+    }).join('')+'<td></td><td></td></tr>';
+
+  document.getElementById('schedule-grid').innerHTML=`
+    <table class="sched-table">
+      <thead>${headerRow1}${headerRow2}</thead>
+      <tbody>${staffRows}</tbody>
+      <tfoot>${aggD}${aggE}${aggN}</tfoot>
+    </table>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CELL EDIT MODAL
+// ═══════════════════════════════════════════════════════════════════
+function openCellModal(staffId, dayIdx){
+  _modalStaffId=staffId;
+  _modalDayIdx=dayIdx;
+  const s=state.staff.find(x=>x.id===staffId);
+  const date=addDays(state.period.start,dayIdx);
+  document.getElementById('modal-title').textContent=
+    `${s.name} · ${fmtDate(date)} (${DOW_KR(dayOfWeek(date))})`;
+  const current=state.schedule[staffId]?.[dayIdx]||'';
+  document.getElementById('shift-picker').innerHTML=
+    [...SHIFTS,'(비우기)'].map(sh=>`
+      <button onclick="setCellShift('${sh==='(비우기)'?'':sh}')"
+        class="btn ${sh===current?'btn-blue':'btn-gray'}"
+        style="justify-content:center;${sh===current?'ring:2px solid #1d4ed8':''}">
+        <span class="leg-dot shift-${sh}" style="width:20px;height:20px;border-radius:4px;font-size:10px">${sh==='OFF'?'○':sh||'✕'}</span>
+        ${sh==='(비우기)'?'비우기':sh}
+      </button>`).join('');
+  document.getElementById('cell-modal').classList.add('open');
+}
+function setCellShift(sh){
+  if(!state.schedule[_modalStaffId]) state.schedule[_modalStaffId]=new Array(state.period.days).fill(null);
+  state.schedule[_modalStaffId][_modalDayIdx]=sh||null;
+  closeModal();
+  renderScheduleGrid();
+  saveState(true);
+}
+function closeModal(){ document.getElementById('cell-modal').classList.remove('open'); }
+document.getElementById('cell-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+
+// ═══════════════════════════════════════════════════════════════════
+//  EXCEL EXPORT (SheetJS)
+// ═══════════════════════════════════════════════════════════════════
+function exportToExcel(){
+  if(!state.staff.length){toast('직원이 없어요');return;}
+  const {staff,period,schedule,minStaff,holidays} = state;
+  const numDays=period.days;
+  const startDate=period.start;
+  const endDate=addDays(startDate,numDays-1);
+
+  // Build worksheet data as array of arrays
+  const data=[];
+  const merge=[];
+
+  // --- Row 0: Title ---
+  const titleRow=new Array(numDays+20).fill(null);
+  titleRow[0]='';
+  titleRow[14]=`${startDate}~${endDate}`;
+  titleRow[29]=`간호사 ${staff.length}(파트장포함)`;
+  data.push(titleRow);
+
+  // --- Row 1: Special day labels ---
+  const dayLabelRow=new Array(numDays+20).fill(null);
+  holidays.forEach(h=>{
+    const d=dateToDayIdx(h.date);
+    if(d>=0&&d<numDays) dayLabelRow[d+4]=h.label||h.type;
+  });
+  data.push(dayLabelRow);
+
+  // --- Row 2: Date numbers + summary headers ---
+  const dateRow=new Array(numDays+20).fill(null);
+  dateRow[1]='수면off';dateRow[2]='생휴';dateRow[3]='전 근무';
+  for(let d=0;d<numDays;d++){
+    const date=addDays(startDate,d);
+    dateRow[d+4]=getDate(date).getDate();
+  }
+  dateRow[numDays+4]='총';dateRow[numDays+5]='총';
+  data.push(dateRow);
+
+  // --- Row 3: Day-of-week + summary sub-headers ---
+  const dowRow=new Array(numDays+20).fill(null);
+  for(let d=0;d<numDays;d++){
+    const date=addDays(startDate,d);
+    dowRow[d+4]=DOW_KR(dayOfWeek(date));
+  }
+  dowRow[numDays+4]='OFF';dowRow[numDays+5]='N';
+  // Weekly columns
+  for(let w=0;w<4;w++){
+    dowRow[numDays+8+w*2]='주';
+    dowRow[numDays+9+w*2]='OFF';
+  }
+  // Leave summary headers
+  const sumHeaders=['경가','병가','공','생휴','법휴','OFF','VAC','수면','주휴','OFF계','N','병가OFF공 포함'];
+  sumHeaders.forEach((h,i)=>dowRow[numDays+16+i]=h);
+  data.push(dowRow);
+
+  // --- Staff rows ---
+  const groupRows={1:[],2:[],3:[]};
+  staff.forEach(s=>{
+    const sched=schedule[s.id]||[];
+    const row=new Array(numDays+30).fill(null);
+    row[0]=s.name;
+    row[3]=s.prevShift||'';
+
+    let offTotal=0,nTotal=0,vac=0,saenghyu=0,beopTotal=0,offCnt=0,vacCnt=0,sumieon=0,juHyu=0;
+
+    for(let d=0;d<numDays;d++){
+      const sh=sched[d]||'';
+      row[d+4]=sh||'';
+      if(sh==='OFF') offCnt++;
+      if(sh==='N') nTotal++;
+      if(sh==='주') juHyu++;
+      if(sh==='VAC') vacCnt++;
+      if(sh==='법') beopTotal++;
+      if(sh==='생휴') saenghyu++;
+      if(sh==='수면') sumieon++;
+      if(REST_TYPES.has(sh)) offTotal++;
+    }
+    row[numDays+4]=offTotal;
+    row[numDays+5]=nTotal;
+
+    // Weekly 주/OFF breakdown (4 weeks)
+    for(let w=0;w<4;w++){
+      let wJu=0,wOff=0;
+      for(let d=w*7;d<Math.min((w+1)*7,numDays);d++){
+        const sh=sched[d];
+        if(sh==='주') wJu++;
+        else if(sh==='OFF') wOff++;
+      }
+      row[numDays+8+w*2]=wJu;
+      row[numDays+9+w*2]=wOff;
+    }
+
+    // Leave summary
+    row[numDays+16]=0; // 경가
+    row[numDays+17]=0; // 병가
+    row[numDays+18]=0; // 공
+    row[numDays+19]=saenghyu;
+    row[numDays+20]=beopTotal;
+    row[numDays+21]=offCnt;
+    row[numDays+22]=vacCnt;
+    row[numDays+23]=sumieon;
+    row[numDays+24]=juHyu;
+    row[numDays+25]=offTotal;
+    row[numDays+26]=nTotal;
+    row[numDays+27]=offTotal;
+
+    data.push(row);
+    groupRows[s.group]?.push({s,sched});
+  });
+
+  // --- Blank row ---
+  data.push(new Array(numDays+20).fill(null));
+
+  // --- Daily D/E/N aggregate ---
+  ['D','E','N','중','중2'].forEach(sh=>{
+    const row=new Array(numDays+20).fill(null);
+    row[0]=sh;
+    for(let d=0;d<numDays;d++){
+      row[d+4]=staff.filter(s=>(schedule[s.id]||[])[d]===sh).length;
+    }
+    data.push(row);
+  });
+
+  // --- Blank row ---
+  data.push(new Array(numDays+20).fill(null));
+
+  // --- Group breakdown rows ---
+  [1,2,3].forEach(g=>{
+    const gStaff=staff.filter(s=>parseInt(s.group)===g);
+    data.push(new Array(numDays+20).fill(null)); // spacer
+    ['D','E','N'].forEach((sh,si)=>{
+      const row=new Array(numDays+20).fill(null);
+      if(si===0) row[0]=`${g}그룹`;
+      row[1]=sh;
+      for(let d=0;d<numDays;d++){
+        row[d+4]=gStaff.filter(s=>(schedule[s.id]||[])[d]===sh).length;
+      }
+      data.push(row);
+    });
+  });
+
+  // Create workbook
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  // Styling via column widths
+  const colWidths=[{wch:12},{wch:6},{wch:6},{wch:8},
+    ...Array(numDays).fill({wch:4}),
+    {wch:5},{wch:5},{wch:5},{wch:5},
+    ...Array(12).fill({wch:5})];
+  ws['!cols']=colWidths;
+
+  // Freeze panes
+  ws['!freeze']={xSplit:4,ySplit:4};
+
+  const wb=XLSX.utils.book_new();
+  const sheetName=`${startDate.replace(/-/g,'').slice(4)}_${endDate.replace(/-/g,'').slice(4)}`;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0,31));
+
+  const fname=`응급실근무표_${startDate}_${endDate}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast(`📥 ${fname} 다운로드!`,3000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  EXPORT SUMMARY
+// ═══════════════════════════════════════════════════════════════════
+function renderExportSummary(){
+  const {staff,period,schedule,minStaff} = state;
+  const numDays=period.days;
+  let warnings=0;
+  const dayStats=[];
+  for(let d=0;d<numDays;d++){
+    const dc={D:0,E:0,N:0};
+    staff.forEach(s=>{const sh=(schedule[s.id]||[])[d];if(dc[sh]!==undefined)dc[sh]++;});
+    if(dc.D<minStaff.D||dc.E<minStaff.E||dc.N<minStaff.N) warnings++;
+    dayStats.push(dc);
+  }
+  const totalCells=staff.length*numDays;
+  const assigned=staff.reduce((acc,s)=>acc+(schedule[s.id]||[]).filter(Boolean).length,0);
+
+  document.getElementById('export-summary').innerHTML=`
+    <div class="stat-grid">
+      <div class="stat-card"><div class="val">${staff.length}</div><div class="lbl">직원 수</div></div>
+      <div class="stat-card"><div class="val">${numDays}</div><div class="lbl">일수</div></div>
+      <div class="stat-card"><div class="val" style="color:${warnings?'#dc2626':'#16a34a'}">${warnings}</div><div class="lbl">인원 부족일</div></div>
+      <div class="stat-card"><div class="val">${Math.round(assigned/totalCells*100)}%</div><div class="lbl">배정률</div></div>
+    </div>
+    ${warnings?`<div style="background:#fef2f2;color:#dc2626;padding:8px 12px;border-radius:8px;font-size:12px;margin-top:8px">
+      ⚠️ ${warnings}일에 D/E/N 최소 인원이 부족해요. 근무표에서 확인해주세요.
+    </div>`:'<div style="background:#f0fdf4;color:#16a34a;padding:8px 12px;border-radius:8px;font-size:12px;margin-top:8px">✅ 모든 날짜의 최소 인원이 충족됐어요!</div>'}
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════
+function init(){
+  loadState();
+  renderStaffTable();
+  updateGroupStats();
+  updatePeriodSummary();
+  renderHolidays();
+  renderLeaveList();
+  updateLeaveStaffSelect();
+  // Sync inputs
+  document.getElementById('inp-start').value=state.period.start;
+  document.getElementById('inp-days').value=state.period.days;
+  document.getElementById('min-D').value=state.minStaff.D;
+  document.getElementById('min-E').value=state.minStaff.E;
+  document.getElementById('min-N').value=state.minStaff.N;
+}
+init();
+</script>
+</body>
+</html>
