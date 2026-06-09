@@ -196,6 +196,7 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
 .user-table tr:hover td{background:#f8fafc}
 .role-badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700}
 .role-admin{background:#dbeafe;color:#1d4ed8}
+.role-editor{background:#fef3c7;color:#d97706}
 .role-user{background:#f0fdf4;color:#16a34a}
 
 /* ── CHANGE PASSWORD MODAL ── */
@@ -465,8 +466,9 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
       </div>
       <div class="field-group"><label>권한</label>
         <select id="new-role">
-          <option value="user">일반 (근무표 조회만 가능)</option>
-          <option value="admin">관리자 (모든 기능 사용 가능)</option>
+          <option value="user">일반 — 근무표 조회만</option>
+          <option value="editor">편집자 — 근무표 조회/편집/작성 가능</option>
+          <option value="admin">관리자 — 모든 기능 + 계정관리</option>
         </select>
       </div>
       <button class="btn btn-blue" style="width:100%;margin-top:4px" onclick="addUser()">+ 계정 추가</button>
@@ -1487,24 +1489,34 @@ function loginAs(user){
   document.getElementById('header-user').textContent =
     `${user.displayName||user.username}`;
 
-  const isAdmin = user.role==='admin';
-  window._scheduleReadOnly = !isAdmin;
+  const isAdmin  = user.role==='admin';
+  const isEditor = user.role==='editor';
+  const canEdit  = isAdmin || isEditor;   // 편집 가능 여부
+  window._scheduleReadOnly = !canEdit;
 
-  // 탭 노출 제어
-  document.getElementById('tab-btn-staff').style.display    = isAdmin?'':'none';
-  document.getElementById('tab-btn-period').style.display   = isAdmin?'':'none';
-  document.getElementById('tab-btn-export').style.display   = isAdmin?'':'none';
+  // ── 탭 노출 제어 ──
+  // 직원관리: 관리자 + 편집자
+  document.getElementById('tab-btn-staff').style.display    = canEdit?'':'none';
+  // 기간설정: 관리자 + 편집자
+  document.getElementById('tab-btn-period').style.display   = canEdit?'':'none';
+  // 엑셀출력: 관리자 + 편집자
+  document.getElementById('tab-btn-export').style.display   = canEdit?'':'none';
+  // 계정관리: 관리자만
   document.getElementById('tab-btn-accounts').style.display = isAdmin?'':'none';
-  document.getElementById('btn-save').style.display         = isAdmin?'':'none';
+  // 저장 버튼: 관리자 + 편집자
+  document.getElementById('btn-save').style.display         = canEdit?'':'none';
 
-  // 근무표 탭 편집 버튼 제어
-  document.getElementById('btn-auto-schedule').style.display = isAdmin?'':'none';
-  document.getElementById('btn-clear-schedule').style.display= isAdmin?'':'none';
-  document.getElementById('btn-export-link').style.display   = isAdmin?'':'none';
+  // ── 근무표 탭 편집 버튼 제어 ──
+  document.getElementById('btn-auto-schedule').style.display  = canEdit?'':'none';
+  document.getElementById('btn-clear-schedule').style.display = canEdit?'':'none';
+  document.getElementById('btn-export-link').style.display    = canEdit?'':'none';
   document.getElementById('sched-hint').textContent =
-    isAdmin ? '셀 클릭 → 근무 변경' : '📋 조회 전용 (편집 불가)';
+    canEdit ? '셀 클릭 → 근무 변경' : '📋 조회 전용 (편집 불가)';
 
   if(isAdmin){
+    showTab('staff');
+  } else if(isEditor){
+    // 편집자: 직원관리 탭으로 이동 (근무표 설정도 가능)
     showTab('staff');
   } else {
     // 일반 사용자: 근무표 탭으로 바로 이동
@@ -1564,7 +1576,7 @@ function renderUserMgmt(){
     <tr>
       <td><strong>${u.displayName||u.username}</strong></td>
       <td style="color:#64748b">${u.username}</td>
-      <td><span class="role-badge ${u.role==='admin'?'role-admin':'role-user'}">${u.role==='admin'?'관리자':'일반'}</span></td>
+      <td><span class="role-badge ${u.role==='admin'?'role-admin':u.role==='editor'?'role-editor':'role-user'}">${u.role==='admin'?'관리자':u.role==='editor'?'편집자':'일반'}</span></td>
       <td style="display:flex;gap:6px">
         <button class="btn btn-gray" style="padding:3px 9px;font-size:11px" onclick="resetUserPw('${u.id}')">비번 초기화</button>
         ${u.id!==currentUser?.id
