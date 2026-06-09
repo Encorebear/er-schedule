@@ -606,11 +606,11 @@ function autoSchedule(){
   const numDays = period.days;
   const startDate = period.start;
 
-  // Initialize
+  // ── 초기화 ──
   const sched = {};
   staff.forEach(s=>{ sched[s.id] = new Array(numDays).fill(null); });
 
-  // Step 1: Apply pre-entered leaves
+  // 사전 등록된 휴가 반영
   staff.forEach(s=>{
     (leaves[s.id]||[]).forEach(l=>{
       const d = dateToDayIdx(l.date);
@@ -618,153 +618,138 @@ function autoSchedule(){
     });
   });
 
-  // Step 2: Apply holidays to all unassigned
+  // 법정공휴일 반영
   for(let d=0;d<numDays;d++){
     const date = addDays(startDate,d);
     const holi = getHoliday(date);
     if(holi && holi.type==='법'){
-      staff.forEach(s=>{
-        if(!sched[s.id][d]) sched[s.id][d]='법';
-      });
+      staff.forEach(s=>{ if(!sched[s.id][d]) sched[s.id][d]='법'; });
     }
   }
 
-  // Step 3: Determine N-streak carryover from prevShift
-  // Track: nStreak[id] = how many consecutive N ending on day -1
-  //        pendingRest[id] = how many rest days still required (from pre-period N)
-  const nStreak = {};
-  const pendingRest = {};
+  // ── 개인별 상태 추적 ──
+  // nStreak  : 현재까지 연속 N 일수 (전날 기준)
+  // restNeeded: 오늘부터 남은 필수 휴무 일수
+  // lastJuhuDay: 마지막 주휴 배정일
+  const ps = {};
   staff.forEach(s=>{
-    nStreak[s.id] = s.prevShift==='N' ? 1 : 0;
-    pendingRest[s.id] = s.prevShift==='N' ? 1 : 0;
-    // N1 → 1 rest; N2+ → 2 rest. For 1 N before period, 1 rest required.
+    const pv = s.prevShift||null;
+    ps[s.id] = {
+      nStreak   : pv==='N' ? 1 : 0,
+      restNeeded: pv==='N' ? 1 : 0,
+      lastJuhuDay: -7
+    };
   });
 
-  // Step 4: Day-by-day scheduling
-  // We'll do a 2-pass approach:
-  // Pass A: mark required rests (post-N), assign 주휴 weekly
-  // Pass B: fill D/E/N for remaining
-
-  // Track weekly주휴 given: weeklyRest[staffId][weekNum] = true
-  const lastRest = {}; // last day of 주휴 per person
-  staff.forEach(s=>{ lastRest[s.id]=-7; });
-
-  // Pass A: Handle N carryover rests
+  // ── 단일 패스: 하루씩 처리 ──
   for(let d=0;d<numDays;d++){
+
+    // ① 인원 분류
+    const forcedRest=[];  // 필수 휴무 (restNeeded>0 또는 nStreak=3 강제)
+    const inNStreak=[];   // N연속 중 (nStreak>0, restNeeded=0) → N 계속 or 쉬어야 함
+    const freeStaff=[];   // 자유 (nStreak=0, restNeeded=0) → D/E/N 가능
+
     staff.forEach(s=>{
       const id=s.id;
-      if(pendingRest[id]>0 && !sched[id][d]){
-        sched[id][d]='OFF';
-        pendingRest[id]--;
-        nStreak[id]=0;
-      }
-    });
-  }
+      if(sched[id][d]!==null) return; // 이미 배정됨(휴가/공휴일)
+      const p=ps[id];
 
-  // Pass B: Assign 주휴 (one per 7 days)
-  for(let d=0;d<numDays;d++){
-    staff.forEach(s=>{
-      const id=s.id;
-      if(sched[id][d]) return; // already assigned
-      const daysSinceLast = d - lastRest[id];
-      if(daysSinceLast>=7){
-        // Try to assign 주휴 today
-        sched[id][d]='주';
-        lastRest[id]=d;
-      }
-    });
-  }
+      // nStreak=3 → 강제 휴무 2일
+      if(p.nStreak>=3){ p.restNeeded=2; p.nStreak=0; }
 
-  // Pass C: Assign N/D/E to meet daily minimums
-  // For each day, count current assignments, then fill gaps
-  for(let d=0;d<numDays;d++){
-    const date=addDays(startDate,d);
-    const isHoli=isHoliday(date)&&state.holidays.find(h=>h.date===date&&h.type==='법');
-    
-    // Count current
-    const count={D:0,E:0,N:0};
-    const available=[];
+      if(p.restNeeded>0)       forcedRest.push(s);
+      else if(p.nStreak>0)     inNStreak.push(s);
+      else                     freeStaff.push(s);
+    });
+
+    // ② 이미 배정된 D/E/N 카운트
+    const cnt={D:0,E:0,N:0};
     staff.forEach(s=>{
       const sh=sched[s.id][d];
-      if(sh==='D'||sh==='E'||sh==='N') count[sh]++;
-      else if(!sh) available.push(s);
+      if(sh==='D') cnt.D++;
+      else if(sh==='E') cnt.E++;
+      else if(sh==='N') cnt.N++;
     });
+    const needN=Math.max(0,minStaff.N-cnt.N);
+    const needD=Math.max(0,minStaff.D-cnt.D);
+    const needE=Math.max(0,minStaff.E-cnt.E);
 
-    const needN=Math.max(0,minStaff.N-count.N);
-    const needD=Math.max(0,minStaff.D-count.D);
-    const needE=Math.max(0,minStaff.E-count.E);
+    const assigned=new Set();
 
-    if(!available.length) continue;
-
-    // Shuffle available with group balancing
-    const shuffled=groupBalancedShuffle(available);
-
-    let idx=0;
-    // Assign N
-    for(let i=0;i<needN&&idx<shuffled.length;i++,idx++){
-      const s=shuffled[idx];
+    // ③ N 배정: inNStreak(연속 우선) → freeStaff 순
+    // N→D 불가: inNStreak인 사람은 이미 전날 N이므로 D배정 불가 (자동 보장)
+    const nPool=groupBalancedShuffle([...inNStreak,...freeStaff]);
+    for(const s of nPool){
+      if(cnt.N>=minStaff.N) break;
+      if(ps[s.id].nStreak>=3) continue; // 이미 처리됨이나 안전 체크
       sched[s.id][d]='N';
-      // Mark post-N rests
-      let streak = nStreak[s.id]+1;
-      nStreak[s.id]=streak;
-      const restNeeded = streak>=2 ? 2 : 1;
-      for(let r=1;r<=restNeeded&&(d+r)<numDays;r++){
-        if(!sched[s.id][d+r]){
-          sched[s.id][d+r] = r===2&&lastRest[s.id]<d+r-7 ? '주' : 'OFF';
-          if(sched[s.id][d+r]==='주') lastRest[s.id]=d+r;
-          // Enforce max 3N: also block further N
-        }
-      }
+      assigned.add(s.id);
+      cnt.N++;
     }
-    // Assign D
-    for(let i=0;i<needD&&idx<shuffled.length;i++,idx++){
-      sched[shuffled[idx].id][d]='D';
-      nStreak[shuffled[idx].id]=0;
-    }
-    // Assign E
-    for(let i=0;i<needE&&idx<shuffled.length;i++,idx++){
-      sched[shuffled[idx].id][d]='E';
-      nStreak[shuffled[idx].id]=0;
-    }
-    // Remaining → OFF (or more E if available)
-    for(;idx<shuffled.length;idx++){
-      const s=shuffled[idx];
-      if(!sched[s.id][d]){
-        // give more E if under-staffed from other cause, else OFF
-        sched[s.id][d]='OFF';
-        nStreak[s.id]=0;
-      }
-    }
-  }
 
-  // Pass D: Recalc nStreak sequentially to fix post-N overlaps
-  // Also enforce: max 3 consecutive N
-  staff.forEach(s=>{
-    let streak=s.prevShift==='N'?1:0;
-    for(let d=0;d<numDays;d++){
-      const sh=sched[s.id][d];
+    // ④ inNStreak 중 N 미배정자 → 연속 N 종료, 필수 휴무 적용
+    for(const s of inNStreak){
+      if(assigned.has(s.id)||sched[s.id][d]!==null) continue;
+      const p=ps[s.id];
+      // 현재 nStreak 기준으로 필요 휴무 계산 후 nStreak 초기화
+      p.restNeeded = p.nStreak>=2 ? 2 : 1;
+      p.nStreak=0;
+      forcedRest.push(s);
+    }
+
+    // ⑤ D 배정: freeStaff 중 미배정자 (N→D 불가이므로 inNStreak 제외)
+    const dPool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)));
+    for(const s of dPool){
+      if(cnt.D>=minStaff.D) break;
+      sched[s.id][d]='D';
+      assigned.add(s.id);
+      cnt.D++;
+    }
+
+    // ⑥ E 배정: freeStaff 중 미배정자
+    const ePool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)));
+    for(const s of ePool){
+      if(cnt.E>=minStaff.E) break;
+      sched[s.id][d]='E';
+      assigned.add(s.id);
+      cnt.E++;
+    }
+
+    // ⑦ 필수 휴무자 → 주휴 or OFF
+    for(const s of forcedRest){
+      if(sched[s.id][d]!==null) continue;
+      const p=ps[s.id];
+      sched[s.id][d] = (d-p.lastJuhuDay>=7) ? '주' : 'OFF';
+      if(sched[s.id][d]==='주') p.lastJuhuDay=d;
+    }
+
+    // ⑧ 잔여 freeStaff (근무 미배정) → 주휴 or OFF
+    for(const s of freeStaff){
+      if(sched[s.id][d]!==null||assigned.has(s.id)) continue;
+      const p=ps[s.id];
+      sched[s.id][d] = (d-p.lastJuhuDay>=7) ? '주' : 'OFF';
+      if(sched[s.id][d]==='주') p.lastJuhuDay=d;
+    }
+
+    // ⑨ 다음날을 위한 personState 업데이트
+    staff.forEach(s=>{
+      const id=s.id;
+      const p=ps[id];
+      const sh=sched[id][d];
       if(sh==='N'){
-        streak++;
-        if(streak>3){
-          // Force OFF
-          sched[s.id][d]='OFF';
-          streak=0;
-        }
+        p.nStreak++;
+        // 연속 N 진행 중: restNeeded는 streak 종료 시 설정
+      } else if(sh==='D'||sh==='E'||sh==='중'){
+        p.nStreak=0;
+        // restNeeded는 이미 0 (freeStaff만 D/E 배정 가능)
       } else {
-        if(REST_TYPES.has(sh)||sh===null) {
-          // resting
-        }
-        streak=sh==='N'?1:0;
+        // 휴무 (OFF/주/VAC/법/생휴/수면/병가)
+        if(sh==='주') p.lastJuhuDay=d;
+        if(p.restNeeded>0) p.restNeeded--;
+        p.nStreak=0;
       }
-    }
-  });
-
-  // Pass E: Fill remaining nulls
-  staff.forEach(s=>{
-    for(let d=0;d<numDays;d++){
-      if(!sched[s.id][d]) sched[s.id][d]='OFF';
-    }
-  });
+    });
+  }
 
   state.schedule=sched;
 }
