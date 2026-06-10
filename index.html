@@ -1889,11 +1889,28 @@ async function init(){
 }
 init();
 
-// ── Service Worker 등록 (PWA 오프라인 지원) ──
+// ── Service Worker 등록 + 자동 업데이트 ──
 if('serviceWorker' in navigator){
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .catch(()=>{}); // 등록 실패해도 앱 정상 동작
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('/sw.js').then(reg=>{
+      // 새 SW가 설치되면 즉시 활성화 요청
+      reg.addEventListener('updatefound', ()=>{
+        const nw = reg.installing;
+        if(!nw) return;
+        nw.addEventListener('statechange', ()=>{
+          if(nw.state==='installed' && navigator.serviceWorker.controller){
+            nw.postMessage('skipWaiting');
+          }
+        });
+      });
+      // SW가 교체되면 자동으로 페이지 새로고침
+      let refreshing=false;
+      navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+        if(refreshing) return;
+        refreshing=true;
+        window.location.reload();
+      });
+    }).catch(()=>{});
   });
 }
 </script>

@@ -1,5 +1,5 @@
 // ER Schedule Service Worker — 오프라인 캐시
-const CACHE = 'er-schedule-v5';
+const CACHE = 'er-schedule-v6';
 const ASSETS = [
   '/',
   '/index.html',
@@ -11,13 +11,11 @@ const ASSETS = [
 // 설치: 핵심 파일 캐시
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(cache => {
-      return Promise.allSettled(
-        ASSETS.map(url => cache.add(url).catch(() => {}))
-      );
-    })
+    caches.open(CACHE).then(cache =>
+      Promise.allSettled(ASSETS.map(url => cache.add(url).catch(() => {})))
+    )
   );
-  self.skipWaiting();
+  self.skipWaiting(); // 즉시 활성화
 });
 
 // 활성화: 이전 캐시 삭제
@@ -27,22 +25,47 @@ self.addEventListener('activate', e => {
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
     )
   );
-  self.clients.claim();
+  self.clients.claim(); // 즉시 모든 탭에 적용
 });
 
-// 요청 처리: 캐시 우선, 없으면 네트워크
+// 메시지: skipWaiting 요청 처리
+self.addEventListener('message', e => {
+  if (e.data === 'skipWaiting') self.skipWaiting();
+});
+
+// 요청 처리
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      const fetchPromise = fetch(e.request).then(response => {
-        if (response && response.status === 200 && response.type !== 'opaque') {
-          const clone = response.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, clone));
+
+  const url = e.request.url;
+  const isHtml = e.request.mode === 'navigate'
+    || url.endsWith('/') || url.endsWith('.html');
+
+  if (isHtml) {
+    // ── HTML: 네트워크 우선 → 오프라인 시 캐시 폴백 ──
+    // 인터넷 있을 때는 항상 최신 버전 제공, 캐시도 갱신
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
         }
-        return response;
-      }).catch(() => null);
-      return cached || fetchPromise;
-    })
-  );
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+  } else {
+    // ── 기타 자산: 캐시 우선 → 없으면 네트워크 ──
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        const net = fetch(e.request).then(res => {
+          if (res && res.status === 200 && res.type !== 'opaque') {
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
+          return res;
+        }).catch(() => null);
+        return cached || net;
+      })
+    );
+  }
 });
