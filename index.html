@@ -88,6 +88,7 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 .shift-생휴{background:#fce7f3;color:#9d174d}
 .shift-수면{background:#ccfbf1;color:#0f766e}
 .shift-중{background:#e0e7ff;color:#3730a3}
+.shift-병가{background:#fee2e2;color:#991b1b}
 
 /* 집계 행 */
 .sum-row td{background:#f8fafc;font-weight:700;font-size:11px;color:#1e40af}
@@ -408,7 +409,10 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
       <div id="history-list" style="min-height:60px"></div>
     </div>
     <div class="card">
-      <div class="card-title">🏖️ 직원별 휴가/특수근무 입력</div>
+      <div class="card-title">🏖️ 직원별 휴가 / 특수근무 / 근무 지정 입력</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.6;background:#f8fafc;padding:7px 10px;border-radius:8px;border-left:3px solid #3b82f6">
+        💡 <b>근무 지정</b>: D·E·N 선택 시 해당 날짜 근무를 고정합니다. 자동 근무표 생성 시 고정 근무가 먼저 배치됩니다.
+      </div>
       <div class="form-row" style="margin-bottom:10px">
         <div class="field">
           <label>직원</label>
@@ -418,16 +422,23 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
           <label>날짜</label>
           <input type="date" id="leave-date">
         </div>
-        <div class="field" style="max-width:110px">
+        <div class="field" style="max-width:140px">
           <label>종류</label>
           <select id="leave-type">
-            <option value="VAC">VAC (연차)</option>
-            <option value="생휴">생휴</option>
-            <option value="법">법 (공휴일)</option>
-            <option value="수면">수면오프</option>
-            <option value="병가">병가</option>
-            <option value="OFF">OFF</option>
-            <option value="주">주휴</option>
+            <optgroup label="── 휴가 / 특수근무 ──">
+              <option value="VAC">VAC (연차)</option>
+              <option value="생휴">생휴</option>
+              <option value="법">법 (공휴일)</option>
+              <option value="수면">수면오프</option>
+              <option value="병가">병가</option>
+              <option value="OFF">OFF</option>
+              <option value="주">주휴</option>
+            </optgroup>
+            <optgroup label="── 근무 고정 지정 ──">
+              <option value="D">D — 주간 고정</option>
+              <option value="E">E — 이브닝 고정</option>
+              <option value="N">N — 나이트 고정</option>
+            </optgroup>
           </select>
         </div>
         <button class="btn btn-blue" onclick="addLeave()">추가</button>
@@ -874,7 +885,9 @@ function addLeave(){
   state.leaves[staffId].push({date,type});
   state.leaves[staffId].sort((a,b)=>a.date.localeCompare(b.date));
   renderLeaveList();saveState(true);
-  toast('휴가 추가됐어요!');
+  const shiftLabels={D:'주간(D)',E:'이브닝(E)',N:'나이트(N)'};
+  if(shiftLabels[type]) toast(`📌 ${fmtDate(date)} ${shiftLabels[type]} 근무 고정됐어요!`);
+  else toast('✅ 휴가/특수근무 추가됐어요!');
 }
 function removeLeave(staffId,date){
   state.leaves[staffId]=(state.leaves[staffId]||[]).filter(l=>l.date!==date);
@@ -887,14 +900,18 @@ function renderLeaveList(){
     (state.leaves[s.id]||[]).forEach(l=>allLeaves.push({...l,staffName:s.name,staffId:s.id}));
   });
   allLeaves.sort((a,b)=>a.date.localeCompare(b.date));
-  if(!allLeaves.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;text-align:center;padding:12px">입력된 휴가 없음</div>';return;}
-  el.innerHTML=allLeaves.map(l=>
-    `<div class="leave-item">
+  if(!allLeaves.length){el.innerHTML='<div style="color:#94a3b8;font-size:12px;text-align:center;padding:12px">입력된 항목 없음</div>';return;}
+  const fixedShifts=['D','E','N'];
+  el.innerHTML=allLeaves.map(l=>{
+    const isFixed=fixedShifts.includes(l.type);
+    const label=isFixed?{D:'주간 고정',E:'이브닝 고정',N:'나이트 고정'}[l.type]:l.type;
+    const icon=isFixed?'📌':'🏖️';
+    return `<div class="leave-item" style="${isFixed?'border-left:3px solid #3b82f6;':''}">
       <span class="leave-badge shift-${l.type}">${l.type}</span>
-      <span><b>${l.staffName}</b> · ${fmtDate(l.date)} (${DOW_KR(dayOfWeek(l.date))})</span>
+      <span>${icon} <b>${l.staffName}</b> · ${fmtDate(l.date)} (${DOW_KR(dayOfWeek(l.date))}) <span style="color:#94a3b8;font-size:11px">${label}</span></span>
       <button class="btn btn-red" style="padding:2px 8px;font-size:11px" onclick="removeLeave('${l.staffId}','${l.date}')">✕</button>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
 }
 
 // ═══════════════════════════════════════════════════════════════════
