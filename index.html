@@ -1151,14 +1151,16 @@ function autoSchedule(){
       const id=s.id, p=ps[id];
       if(sched[id][d]!==null) continue;
 
-      // nCommit 중: 연속 N은 무조건 유지 (개인 최대치만 체크, 그룹캡/일별상한 미적용)
-      // → 이 경로에서 캡을 걸면 N 1개+OFF 패턴이 발생하므로 절대 제한 금지
+      // nCommit 중: 연속 N 유지 (개인 최대치 + noOverlap 체크 필수)
       if(p.nCommit>0){
-        if(p.nCount<nMaxOf(id)){
+        // ★ noOverlap 겹침 금지: 이미 같은 날 N에 배정된 겹침 금지 직원이 있으면 N 강제 중단
+        const noOvlBlocked=noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='N');
+        if(p.nCount<nMaxOf(id)&&!noOvlBlocked){
           sched[id][d]='N'; assigned.add(id); cnt.N++;
           grpCntN[s.group]=(grpCntN[s.group]||0)+1;
           if(juniorIds.has(id)) jCnt.N++;
         }
+        // N 미배정 시 → 아래 inNStreak 사후 루프에서 restNeeded 자동 설정됨
         continue;
       }
 
@@ -1307,9 +1309,17 @@ function autoSchedule(){
       if(off<=hi) return;
       for(let d=0;d<numDays&&off>hi;d++){
         if(sched[id][d]==='OFF'){
-          if(adjDE[d].D<softMaxD){
+          // ★ N 후 의무 휴무 보호: 전날 N이면 절대 D/E로 바꾸지 않음
+          if(d>0&&sched[id][d-1]==='N') continue;
+          // ★ N 2연속 후 2일 의무 휴무 보호: 2일 전이 N이고 전날이 비근무면 2번째 의무휴무
+          if(d>1&&sched[id][d-2]==='N'&&sched[id][d-1]!=='D'&&sched[id][d-1]!=='E') continue;
+          // ★ noOverlap 직원: D/E에 이미 겹침 금지 동료 있으면 해당 시프트 스킵
+          const isNoOvl=noOverlapIds.has(id);
+          const noOvlD=isNoOvl&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='D');
+          const noOvlE=isNoOvl&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='E');
+          if(adjDE[d].D<softMaxD&&!noOvlD){
             sched[id][d]='D'; adjDE[d].D++; off--;
-          } else if(adjDE[d].E<softMaxE){
+          } else if(adjDE[d].E<softMaxE&&!noOvlE){
             sched[id][d]='E'; adjDE[d].E++; off--;
           }
         }
@@ -1330,6 +1340,52 @@ function autoSchedule(){
         }
       }
     });
+  }
+
+  // ── 후처리: N 규칙 강제 적용 ──
+  // (1) 나이트 직후 D/E 절대 불가
+  // (2) 연속 나이트 2개 이상 → 이후 2일은 반드시 휴무(OFF/주 등; D·E·추가N 불가)
+  {
+    const isRest=sh=>sh&&sh!=='D'&&sh!=='E'&&sh!=='N';
+    staff.forEach(s=>{
+      const id=s.id;
+      let d=0;
+      while(d<numDays){
+        if(sched[id][d]==='N'){
+          let streak=0;
+          while(d+streak<numDays&&sched[id][d+streak]==='N') streak++;
+          // d+streak = N 종료 직후 첫날
+          const reqRest=streak>=2?2:1;
+          for(let r=d+streak;r<d+streak+reqRest&&r<numDays;r++){
+            // 주·VAC 등 이미 휴무면 그대로, D/E/N이면 OFF로 강제
+            if(sched[id][r]==='D'||sched[id][r]==='E'||
+               (streak>=2&&sched[id][r]==='N')){
+              sched[id][r]='OFF';
+            }
+          }
+          d+=streak;
+        } else { d++; }
+      }
+    });
+  }
+
+  // ── 후처리: noOverlap 겹침 강제 해소 ──
+  // 이경희·오선영·우영미 중 같은 날 같은 시프트에 2명 이상 배정되면
+  // workCount 많은 순으로 제거 → OFF 처리
+  {
+    const noOvArr=staff.filter(s=>noOverlapIds.has(s.id));
+    for(let d=0;d<numDays;d++){
+      ['D','E','N'].forEach(sh=>{
+        const conflicting=noOvArr.filter(s=>sched[s.id][d]===sh);
+        if(conflicting.length>=2){
+          // workCount 내림차순 — 가장 많이 일한 사람(들) 제거
+          conflicting.sort((a,b)=>(ps[b.id]?.workCount||0)-(ps[a.id]?.workCount||0));
+          for(let i=0;i<conflicting.length-1;i++){
+            sched[conflicting[i].id][d]='OFF';
+          }
+        }
+      });
+    }
   }
 
   state.schedule=sched;
@@ -1523,8 +1579,7 @@ function checkScheduleViolations(sched){
     const preWorkDays=Object.values(fixedMap[id]).filter(t=>['D','E','N'].includes(t)).length;
     const freeDays=numDays-preRestDays-preWorkDays;
     const preN=Object.values(fixedMap[id]).filter(t=>t==='N').length;
-    // N 2연속 최소 1쌍 + 남은 N은 2연속 → 3N 최소 필요 가용일: 4일 (2+2)
-    const needFree=Math.max(0,(3-preN)*2); // 사전N 제외하고 필요한 free 일수
+    const needFree=Math.max(0,(3-preN)*2);
     if(preN+(Math.floor(freeDays/2))< 3 && freeDays<needFree){
       viols.push({
         level:'warn',
@@ -1534,6 +1589,63 @@ function checkScheduleViolations(sched){
       });
     }
   });
+
+  // ⑥ 최종 근무표 검사: 나이트 직후 D/E 위반
+  staff.forEach(s=>{
+    const id=s.id, shifts=sched[id]||[];
+    for(let d=0;d<numDays-1;d++){
+      if(shifts[d]==='N'&&(shifts[d+1]==='D'||shifts[d+1]==='E')){
+        viols.push({
+          level:'error',
+          rule:'나이트 직후 D/E 위반',
+          msg:`${s.name} — ${dayLabel(d)} 나이트 다음날(${dayLabel(d+1)}) ${shifts[d+1]} 배정`,
+          cause:'나이트 직후 데이/이브닝은 절대 불가합니다. 수동 조정이 필요합니다.'
+        });
+      }
+    }
+  });
+
+  // ⑦ 최종 근무표 검사: 나이트 2연속 이상 후 2일 휴무 미준수
+  staff.forEach(s=>{
+    const id=s.id, shifts=sched[id]||[];
+    let d=0;
+    while(d<numDays){
+      if(shifts[d]==='N'){
+        let streak=0;
+        while(d+streak<numDays&&shifts[d+streak]==='N') streak++;
+        if(streak>=2){
+          for(let r=d+streak;r<d+streak+2&&r<numDays;r++){
+            if(shifts[r]==='D'||shifts[r]==='E'||shifts[r]==='N'){
+              viols.push({
+                level:'error',
+                rule:'나이트 연속 후 휴무 부족',
+                msg:`${s.name} — 나이트 ${streak}연속(${dayLabel(d)}~${dayLabel(d+streak-1)}) 후 ${dayLabel(r)} ${shifts[r]} 배정`,
+                cause:`나이트 ${streak}연속 후에는 최소 2일 휴무가 필요합니다 (주 포함 가능).`
+              });
+              break;
+            }
+          }
+        }
+        d+=streak;
+      } else { d++; }
+    }
+  });
+
+  // ⑧ 최종 근무표 검사: 겹침 금지 직원 동일 시프트 동일 날
+  const noOvStaffFinal=staff.filter(s=>noOverlapIds.has(s.id));
+  for(let d=0;d<numDays;d++){
+    ['D','E','N'].forEach(sh=>{
+      const conflict=noOvStaffFinal.filter(s=>(sched[s.id]||[])[d]===sh);
+      if(conflict.length>=2){
+        viols.push({
+          level:'error',
+          rule:'겹침 금지 직원 동시 배정',
+          msg:`${dayLabel(d)} [${sh}] — ${conflict.map(s=>s.name).join('·')} 동시 배정됨`,
+          cause:'이경희·오선영·우영미는 같은 날 같은 근무에 동시 배정될 수 없습니다. 수동 조정이 필요합니다.'
+        });
+      }
+    });
+  }
 
   return viols;
 }
