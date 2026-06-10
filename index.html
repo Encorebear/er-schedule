@@ -1291,6 +1291,14 @@ function autoSchedule(){
       if(['D','E'].includes(sched[id][d])&&['D','E'].includes(sched[id][d+1])){
         if(nCnt>=nMaxOf(id)) break;
         if(dayCntN[d]>=minStaff.N||dayCntN[d+1]>=minStaff.N) continue;
+        // ★ d/d+1 날 자체: D/E를 N으로 교체 시 그 날 D/E가 최소치 이하로 떨어지면 skip
+        {
+          const _sh0=sched[id][d], _sh1=sched[id][d+1];
+          const _cnt0=(_sh0==='D'?dayCntD_pre:dayCntE_pre)[d];
+          if(_cnt0<=(_sh0==='D'?minStaff.D:minStaff.E)) continue;
+          const _cnt1=(_sh1==='D'?dayCntD_pre:dayCntE_pre)[d+1];
+          if(_cnt1<=(_sh1==='D'?minStaff.D:minStaff.E)) continue;
+        }
         // ★ d+2: 이 사람의 D/E가 N 이후 강제 제거되므로 잉여 있어야 함
         if(d+2<numDays&&(sched[id][d+2]==='D'||sched[id][d+2]==='E')){
           const sh2=sched[id][d+2];
@@ -1362,7 +1370,12 @@ function autoSchedule(){
           if(!prevE&&adjDE[d].D<softMaxD&&!noOvlD){
             sched[id][d]='D'; adjDE[d].D++; off--;
           } else if(adjDE[d].E<softMaxE&&!noOvlE){
+            // ★ E→D 다음날 충돌 방지: 내일 D가 최소치라면 E 배정 불가
+            // (E 배정 후 강제적용 시 내일 D가 제거돼 부족해짐)
+            if(d+1<numDays && sched[id][d+1]==='D' && adjDE[d+1].D<=minStaff.D) continue;
             sched[id][d]='E'; adjDE[d].E++; off--;
+            // 강제적용으로 내일 D가 제거될 것이므로 adjDE 선반영
+            if(d+1<numDays && sched[id][d+1]==='D') adjDE[d+1].D--;
           }
         }
       }
@@ -1660,8 +1673,8 @@ function autoSchedule(){
     }
   };
 
-  // ── 강제 + 제거 + 보충 사이클 3회 반복 (수렴 보장) ──
-  for(let cycle=0;cycle<3;cycle++){
+  // ── 강제 + 제거 + 보충 사이클 5회 반복 (수렴 보장) ──
+  for(let cycle=0;cycle<5;cycle++){
     enforceRules();
     removeOverflow();
     fillOnce();
