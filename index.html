@@ -1151,16 +1151,15 @@ function autoSchedule(){
       const id=s.id, p=ps[id];
       if(sched[id][d]!==null) continue;
 
-      // nCommit 중: 연속 N 유지 (개인 최대치 + noOverlap 체크 필수)
+      // nCommit 중: 연속 N 유지 (개인 최대치 + noOverlap + 일별 상한 체크)
       if(p.nCommit>0){
-        // ★ noOverlap 겹침 금지: 이미 같은 날 N에 배정된 겹침 금지 직원이 있으면 N 강제 중단
         const noOvlBlocked=noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='N');
-        if(p.nCount<nMaxOf(id)&&!noOvlBlocked){
+        // ★ 일별 N 정확한 인원 상한 추가: cnt.N이 이미 minStaff.N이면 커밋 중단 → 필수 휴무
+        if(p.nCount<nMaxOf(id)&&!noOvlBlocked&&cnt.N<minStaff.N){
           sched[id][d]='N'; assigned.add(id); cnt.N++;
           grpCntN[s.group]=(grpCntN[s.group]||0)+1;
           if(juniorIds.has(id)) jCnt.N++;
         }
-        // N 미배정 시 → 아래 inNStreak 사후 루프에서 restNeeded 자동 설정됨
         continue;
       }
 
@@ -1187,7 +1186,7 @@ function autoSchedule(){
     for(const s of inNStreak){
       if(assigned.has(s.id)||sched[s.id][d]!==null) continue;
       const p=ps[s.id];
-      p.restNeeded=p.nStreak>=2?2:1;
+      p.restNeeded=2; // N이 1개든 2개든 무조건 2일 쉼 (N→OFF→D/E 방지)
       p.nStreak=0; p.nCommit=0;
       forcedRest.push(s);
     }
@@ -1273,7 +1272,7 @@ function autoSchedule(){
       if(['D','E'].includes(sched[id][d])&&['D','E'].includes(sched[id][d+1])){
         if(nCnt>=nMaxOf(id)) break;
         // 양쪽 날 모두 일별 상한 미만인 경우에만 N으로 교체
-        if(dayCntN[d]>=N_DAY_MAX||dayCntN[d+1]>=N_DAY_MAX) continue;
+        if(dayCntN[d]>=minStaff.N||dayCntN[d+1]>=minStaff.N) continue;
         sched[id][d]='N'; sched[id][d+1]='N'; nCnt+=2;
         dayCntN[d]++; dayCntN[d+1]++;
         d++;
@@ -1390,6 +1389,43 @@ function autoSchedule(){
     }
   }
 
+  // ── 후처리: 일별 초과 인원 제거 ──
+  // D/E/N 인원이 minStaff를 초과하면 잠금 없는 직원부터 OFF로 전환
+  {
+    const manOvrRef0=state.manualOverrides||{};
+    const isLocked0=(id,d2)=>!!(manOvrRef0[id]&&manOvrRef0[id][d2]);
+    for(let d=0;d<numDays;d++){
+      for(const sh of ['N','D','E']){
+        const target=sh==='D'?minStaff.D:sh==='E'?minStaff.E:minStaff.N;
+        const onShift=staff.filter(s=>sched[s.id][d]===sh&&!isLocked0(s.id,d));
+        if(onShift.length>target){
+          // workCount 많은 순(가장 많이 일한 사람부터) OFF로 전환
+          onShift.sort((a,b)=>(ps[b.id]?.workCount||0)-(ps[a.id]?.workCount||0));
+          for(let i=0;i<onShift.length-target;i++) sched[onShift[i].id][d]='OFF';
+        }
+      }
+    }
+  }
+
+  // ── 후처리: N 규칙 재강제 (초과 제거/fill pass가 N→D/E를 다시 만들 수 있으므로) ──
+  {
+    staff.forEach(s=>{
+      const id=s.id;
+      let d=0;
+      while(d<numDays){
+        if(sched[id][d]==='N'){
+          let streak=0;
+          while(d+streak<numDays&&sched[id][d+streak]==='N') streak++;
+          // N 연속 종료 후 2일은 D/E 불가
+          for(let r=d+streak;r<d+streak+2&&r<numDays;r++){
+            if(sched[id][r]==='D'||sched[id][r]==='E') sched[id][r]='OFF';
+          }
+          d+=streak;
+        } else { d++; }
+      }
+    });
+  }
+
   // ── 후처리: 일별 최소 인원 보충 ──
   // 규칙 강제 패스(N→OFF, noOverlap→OFF)로 줄어든 D/E/N 인원을 OFF 직원에서 보충
   {
@@ -1461,6 +1497,40 @@ function autoSchedule(){
         }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
         for(let i=0;i<need&&i<cands.length;i++){
           sched[cands[i].id][d]='N';
+        }
+      }
+    }
+  }
+
+  // ── 최종 정리 ①: fill pass 이후 N→OFF→D/E 패턴 재강제 ──
+  {
+    staff.forEach(s=>{
+      const id=s.id;
+      let d=0;
+      while(d<numDays){
+        if(sched[id][d]==='N'){
+          let streak=0;
+          while(d+streak<numDays&&sched[id][d+streak]==='N') streak++;
+          for(let r=d+streak;r<d+streak+2&&r<numDays;r++){
+            if(sched[id][r]==='D'||sched[id][r]==='E') sched[id][r]='OFF';
+          }
+          d+=streak;
+        } else { d++; }
+      }
+    });
+  }
+
+  // ── 최종 정리 ②: fill pass 이후 초과 인원 제거 ──
+  {
+    const manOvrRefFinal=state.manualOverrides||{};
+    const isLockedFinal=(id,d2)=>!!(manOvrRefFinal[id]&&manOvrRefFinal[id][d2]);
+    for(let d=0;d<numDays;d++){
+      for(const sh of ['N','D','E']){
+        const target=sh==='D'?minStaff.D:sh==='E'?minStaff.E:minStaff.N;
+        const onShift=staff.filter(s=>sched[s.id][d]===sh&&!isLockedFinal(s.id,d));
+        if(onShift.length>target){
+          onShift.sort((a,b)=>(ps[b.id]?.workCount||0)-(ps[a.id]?.workCount||0));
+          for(let i=0;i<onShift.length-target;i++) sched[onShift[i].id][d]='OFF';
         }
       }
     }
