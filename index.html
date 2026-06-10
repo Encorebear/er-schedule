@@ -1016,7 +1016,8 @@ function runAutoSchedule(){
 }
 
 function autoSchedule(){
-  const {staff,period,minStaff,holidays,leaves} = state;
+  const {staff:_staffSrc,period,minStaff,holidays,leaves} = state;
+  let staff=[..._staffSrc]; // 로컬 복사 — 셔플해도 state.staff 안전
   const numDays = period.days;
   const startDate = period.start;
 
@@ -1117,6 +1118,19 @@ function autoSchedule(){
       }
     });
   }
+
+  // ── 다중 시도: 직원 순서 변경으로 최적해 탐색 (최대 3회) ──
+  const _initSched={}, _initPs={};
+  staff.forEach(s=>{ _initSched[s.id]=[...sched[s.id]]; _initPs[s.id]={...ps[s.id]}; });
+  let _bestSchedResult=null, _bestSF=Infinity;
+
+  for(let _tryN=0;_tryN<3;_tryN++){
+    // 1회 이후: 초기 상태 복원 + 직원 순서 셔플
+    if(_tryN>0){
+      staff.forEach(s=>{ sched[s.id]=[..._initSched[s.id]]; ps[s.id]={..._initPs[s.id]}; });
+      // Fisher-Yates 셔플
+      for(let i=staff.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [staff[i],staff[j]]=[staff[j],staff[i]]; }
+    }
 
   // ── 메인 패스 ──
   for(let d=0;d<numDays;d++){
@@ -1774,6 +1788,25 @@ function autoSchedule(){
   enforceRules();
   removeOverflow();
   fillOnce();
+
+  // ── 다중 시도 평가: 이번 결과 shortfall 집계 ──
+  {
+    let _sf=0;
+    for(let d=0;d<numDays;d++){
+      if(staff.filter(s=>sched[s.id][d]==='D').length<minStaff.D) _sf++;
+      if(staff.filter(s=>sched[s.id][d]==='N').length<minStaff.N) _sf++;
+    }
+    if(_sf<_bestSF){
+      _bestSF=_sf;
+      _bestSchedResult={};
+      staff.forEach(s=>{ _bestSchedResult[s.id]=[...sched[s.id]]; });
+    }
+    if(_sf===0) break; // 완벽한 해 → 즉시 종료
+  }
+  } // end _tryN loop
+
+  // 최고 결과 적용
+  if(_bestSchedResult){ staff.forEach(s=>{ sched[s.id]=[..._bestSchedResult[s.id]]; }); }
 
   state.schedule=sched;
 
