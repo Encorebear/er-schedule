@@ -89,6 +89,7 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 .shift-수면{background:#ccfbf1;color:#0f766e}
 .shift-중{background:#e0e7ff;color:#3730a3}
 .shift-병가{background:#fee2e2;color:#991b1b}
+.cell-pinned{background:#fef08a!important;outline:2px solid #ca8a04!important;font-weight:800!important;color:#78350f!important}
 
 /* 집계 행 */
 .sum-row td{background:#f8fafc;font-weight:700;font-size:11px;color:#1e40af}
@@ -940,152 +941,190 @@ function autoSchedule(){
   const numDays = period.days;
   const startDate = period.start;
 
-  // ── 초기화 ──
-  const sched = {};
-  staff.forEach(s=>{ sched[s.id] = new Array(numDays).fill(null); });
+  // ── 특수 직원 설정 ──
+  const NO_OVERLAP_NAMES = new Set(['이경희','오선영','우영미']);
+  const JUNIOR_NAMES     = new Set(['이유진','이창성','백지선','정진우','김민아','장미선']);
+  const N_MAX_OVERRIDE   = {'이경희':3,'오선영':4};
+  const N_PER_MIN=3, N_PER_MAX=8, JUNIOR_SHIFT_MAX=3;
 
-  // 사전 등록된 휴가 반영
+  const noOverlapIds = new Set(staff.filter(s=>NO_OVERLAP_NAMES.has(s.name)).map(s=>s.id));
+  const juniorIds    = new Set(staff.filter(s=>JUNIOR_NAMES.has(s.name)).map(s=>s.id));
+  const nMaxOf = id=>{ const s=staff.find(x=>x.id===id); return s?(N_MAX_OVERRIDE[s.name]??N_PER_MAX):N_PER_MAX; };
+
+  // ── 초기화 ──
+  const sched={};
+  staff.forEach(s=>{ sched[s.id]=new Array(numDays).fill(null); });
+
+  // ── leaves 적용 + 주휴 요일 전체 확장 ──
   staff.forEach(s=>{
-    (leaves[s.id]||[]).forEach(l=>{
-      const d = dateToDayIdx(l.date);
-      if(d>=0 && d<numDays) sched[s.id][d] = l.type;
-    });
+    const sl=leaves[s.id]||[];
+    sl.forEach(l=>{ const d=dateToDayIdx(l.date); if(d>=0&&d<numDays) sched[s.id][d]=l.type; });
+    // 주 신청 요일 → 해당 기간 내 같은 요일 전부 주
+    const juhuDows=new Set(sl.filter(l=>l.type==='주').map(l=>dayOfWeek(l.date)));
+    if(juhuDows.size>0){
+      for(let d=0;d<numDays;d++){
+        if(!sched[s.id][d]&&juhuDows.has(dayOfWeek(addDays(startDate,d)))) sched[s.id][d]='주';
+      }
+    }
   });
 
-  // 법정공휴일 반영
+  // ── 법정공휴일 ──
   for(let d=0;d<numDays;d++){
-    const date = addDays(startDate,d);
-    const holi = getHoliday(date);
-    if(holi && holi.type==='법'){
-      staff.forEach(s=>{ if(!sched[s.id][d]) sched[s.id][d]='법'; });
-    }
+    const holi=getHoliday(addDays(startDate,d));
+    if(holi&&holi.type==='법') staff.forEach(s=>{ if(!sched[s.id][d]) sched[s.id][d]='법'; });
   }
 
-  // ── 개인별 상태 추적 ──
-  // nStreak  : 현재까지 연속 N 일수 (전날 기준)
-  // restNeeded: 오늘부터 남은 필수 휴무 일수
-  // lastJuhuDay: 마지막 주휴 배정일
-  const ps = {};
+  // ── personState ──
+  const ps={};
+  const REST_SET=new Set(['OFF','주','VAC','법','생휴','수면','병가']);
   staff.forEach(s=>{
-    const pv = s.prevShift||null;
-    ps[s.id] = {
-      nStreak   : pv==='N' ? 1 : 0,
-      restNeeded: pv==='N' ? 1 : 0,
+    const pv=s.prevShift||null;
+    ps[s.id]={
+      nStreak:    pv==='N'?1:0,
+      nCommit:    0,        // 남은 최소 N 연속 커밋 일수
+      restNeeded: pv==='N'?1:0,
       lastJuhuDay: -7,
-      workCount : 0   // 누적 근무일수 (D/E/N 합계) — 공평 배분용
+      hadRestSinceJuhu: true,  // 마지막 주 이후 OFF가 있었는지 (주휴 사이 1일 휴무 보장)
+      workCount:  0,
+      nCount:     0,
     };
   });
 
-  // ── 단일 패스: 하루씩 처리 ──
+  // ── 메인 패스 ──
   for(let d=0;d<numDays;d++){
 
-    // ① 인원 분류
-    const forcedRest=[];  // 필수 휴무 (restNeeded>0 또는 nStreak=3 강제)
-    const inNStreak=[];   // N연속 중 (nStreak>0, restNeeded=0) → N 계속 or 쉬어야 함
-    const freeStaff=[];   // 자유 (nStreak=0, restNeeded=0) → D/E/N 가능
-
-    staff.forEach(s=>{
-      const id=s.id;
-      if(sched[id][d]!==null) return; // 이미 배정됨(휴가/공휴일)
-      const p=ps[id];
-
-      // nStreak=3 → 강제 휴무 2일
-      if(p.nStreak>=3){ p.restNeeded=2; p.nStreak=0; }
-
-      if(p.restNeeded>0)       forcedRest.push(s);
-      else if(p.nStreak>0)     inNStreak.push(s);
-      else                     freeStaff.push(s);
-    });
-
-    // ② 이미 배정된 D/E/N 카운트
+    // 이미 배정된 D/E/N 카운트
     const cnt={D:0,E:0,N:0};
+    const jCnt={D:0,E:0,N:0};
     staff.forEach(s=>{
       const sh=sched[s.id][d];
-      if(sh==='D') cnt.D++;
-      else if(sh==='E') cnt.E++;
-      else if(sh==='N') cnt.N++;
+      if(sh==='D'||sh==='E'||sh==='N'){
+        cnt[sh]++;
+        if(juniorIds.has(s.id)) jCnt[sh]++;
+      }
     });
-    const needN=Math.max(0,minStaff.N-cnt.N);
-    const needD=Math.max(0,minStaff.D-cnt.D);
-    const needE=Math.max(0,minStaff.E-cnt.E);
+
+    // 인원 분류
+    const forcedRest=[],inNStreak=[],freeStaff=[];
+    staff.forEach(s=>{
+      if(sched[s.id][d]!==null) return;
+      const p=ps[s.id];
+      if(p.nStreak>=3){ p.restNeeded=2; p.nStreak=0; p.nCommit=0; }
+      // 주휴 사이 최소 1일 휴무 보장: 마지막 주 후 6일째 아직 OFF 없으면 강제 휴무
+      if(!p.hadRestSinceJuhu && d-p.lastJuhuDay>=6) p.restNeeded=Math.max(p.restNeeded,1);
+      if(p.restNeeded>0) forcedRest.push(s);
+      else if(p.nStreak>0||p.nCommit>0) inNStreak.push(s);
+      else freeStaff.push(s);
+    });
 
     const assigned=new Set();
 
-    // ③ N 배정: inNStreak(연속 우선) → freeStaff 순
-    // N→D 불가: inNStreak인 사람은 이미 전날 N이므로 D배정 불가 (자동 보장)
+    // ③ N 배정
     const nPool=groupBalancedShuffle([...inNStreak,...freeStaff],ps);
     for(const s of nPool){
+      const id=s.id, p=ps[id];
+      if(sched[id][d]!==null) continue;
+
+      // nCommit 중 → 무조건 N (N max 초과 시 skip)
+      if(p.nCommit>0){
+        if(p.nCount<nMaxOf(id)){
+          sched[id][d]='N'; assigned.add(id); cnt.N++;
+          if(juniorIds.has(id)) jCnt.N++;
+        }
+        continue;
+      }
+
       if(cnt.N>=minStaff.N) break;
-      if(ps[s.id].nStreak>=3) continue; // 이미 처리됨이나 안전 체크
-      sched[s.id][d]='N';
-      assigned.add(s.id);
-      cnt.N++;
+      if(p.nCount>=nMaxOf(id)) continue;
+
+      // 이경희/오선영/우영미 같은 근무 겹침 금지
+      if(noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='N')) continue;
+      // 신입 N 최대 3명
+      if(juniorIds.has(id)&&jCnt.N>=JUNIOR_SHIFT_MAX) continue;
+
+      // N 최소 2일 연속 보장: 새 N 시작 시 내일 가능 여부 확인
+      if(p.nStreak===0){
+        const tmw=d+1<numDays?sched[id][d+1]:null;
+        if(tmw!==null&&tmw!=='N') continue; // 내일 이미 다른 배정 → N 시작 불가
+        p.nCommit=1; // 내일도 N 배정 커밋
+      }
+
+      sched[id][d]='N'; assigned.add(id); cnt.N++;
+      if(juniorIds.has(id)) jCnt.N++;
     }
 
-    // ④ inNStreak 중 N 미배정자 → 연속 N 종료, 필수 휴무 적용
+    // inNStreak 중 N 미배정 → 연속 종료 + 필수 휴무
     for(const s of inNStreak){
       if(assigned.has(s.id)||sched[s.id][d]!==null) continue;
       const p=ps[s.id];
-      // 현재 nStreak 기준으로 필요 휴무 계산 후 nStreak 초기화
-      p.restNeeded = p.nStreak>=2 ? 2 : 1;
-      p.nStreak=0;
+      p.restNeeded=p.nStreak>=2?2:1;
+      p.nStreak=0; p.nCommit=0;
       forcedRest.push(s);
     }
 
-    // ⑤ D 배정: freeStaff 중 미배정자 (N→D 불가이므로 inNStreak 제외)
+    // ④ D 배정
     const dPool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)),ps);
     for(const s of dPool){
       if(cnt.D>=minStaff.D) break;
-      sched[s.id][d]='D';
-      assigned.add(s.id);
-      cnt.D++;
+      const id=s.id;
+      if(noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='D')) continue;
+      if(juniorIds.has(id)&&jCnt.D>=JUNIOR_SHIFT_MAX) continue;
+      sched[id][d]='D'; assigned.add(id); cnt.D++;
+      if(juniorIds.has(id)) jCnt.D++;
     }
 
-    // ⑥ E 배정: freeStaff 중 미배정자
+    // ⑤ E 배정
     const ePool=groupBalancedShuffle(freeStaff.filter(s=>!assigned.has(s.id)),ps);
     for(const s of ePool){
       if(cnt.E>=minStaff.E) break;
-      sched[s.id][d]='E';
-      assigned.add(s.id);
-      cnt.E++;
-    }
-
-    // ⑦ 필수 휴무자 → 주휴 or OFF
-    for(const s of forcedRest){
-      if(sched[s.id][d]!==null) continue;
-      const p=ps[s.id];
-      sched[s.id][d] = (d-p.lastJuhuDay>=7) ? '주' : 'OFF';
-      if(sched[s.id][d]==='주') p.lastJuhuDay=d;
-    }
-
-    // ⑧ 잔여 freeStaff (근무 미배정) → 주휴 or OFF
-    for(const s of freeStaff){
-      if(sched[s.id][d]!==null||assigned.has(s.id)) continue;
-      const p=ps[s.id];
-      sched[s.id][d] = (d-p.lastJuhuDay>=7) ? '주' : 'OFF';
-      if(sched[s.id][d]==='주') p.lastJuhuDay=d;
-    }
-
-    // ⑨ 다음날을 위한 personState 업데이트
-    staff.forEach(s=>{
       const id=s.id;
-      const p=ps[id];
-      const sh=sched[id][d];
+      if(noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='E')) continue;
+      if(juniorIds.has(id)&&jCnt.E>=JUNIOR_SHIFT_MAX) continue;
+      sched[id][d]='E'; assigned.add(id); cnt.E++;
+      if(juniorIds.has(id)) jCnt.E++;
+    }
+
+    // ⑥ 나머지 미배정자 전원 → 주휴 or OFF
+    staff.forEach(s=>{
+      if(sched[s.id][d]!==null) return;
+      const p=ps[s.id];
+      const sh=d-p.lastJuhuDay>=7?'주':'OFF';
+      sched[s.id][d]=sh;
+      if(sh==='주'){ p.lastJuhuDay=d; p.hadRestSinceJuhu=false; }
+      else p.hadRestSinceJuhu=true;
+    });
+
+    // ⑦ personState 업데이트
+    staff.forEach(s=>{
+      const id=s.id, p=ps[id], sh=sched[id][d];
       if(sh==='N'){
-        p.nStreak++;
-        p.workCount++;
+        p.nStreak++; p.nCount++; p.workCount++;
+        if(p.nCommit>0) p.nCommit--;
       } else if(sh==='D'||sh==='E'||sh==='중'){
-        p.nStreak=0;
-        p.workCount++;
-        // restNeeded는 이미 0 (freeStaff만 D/E 배정 가능)
+        p.nStreak=0; p.nCommit=0; p.workCount++;
       } else {
-        // 휴무 (OFF/주/VAC/법/생휴/수면/병가)
-        if(sh==='주') p.lastJuhuDay=d;
+        // 휴무
+        p.nStreak=0; p.nCommit=0;
         if(p.restNeeded>0) p.restNeeded--;
-        p.nStreak=0;
+        if(sh==='주'){ p.lastJuhuDay=d; p.hadRestSinceJuhu=false; }
+        else p.hadRestSinceJuhu=true;
       }
     });
   }
+
+  // ── 후처리: N 최소 3개 보장 (best-effort) ──
+  staff.forEach(s=>{
+    const id=s.id;
+    let nCnt=sched[id].filter(sh=>sh==='N').length;
+    if(nCnt>=N_PER_MIN) return;
+    for(let d=0;d<numDays-1&&nCnt<N_PER_MIN;d++){
+      // D/E 2연속 구간 → N으로 교체
+      if(['D','E'].includes(sched[id][d])&&['D','E'].includes(sched[id][d+1])){
+        if(nCnt>=nMaxOf(id)) break;
+        sched[id][d]='N'; sched[id][d+1]='N'; nCnt+=2; d++;
+      }
+    }
+  });
 
   state.schedule=sched;
 }
@@ -1180,6 +1219,18 @@ function renderScheduleGrid(){
     });
   }
 
+  // 고정 근무(D/E/N) 맵 — 노란색 표시용
+  const fixedMap={};
+  staff.forEach(s=>{
+    fixedMap[s.id]=new Set();
+    (state.leaves[s.id]||[]).forEach(l=>{
+      if(['D','E','N'].includes(l.type)){
+        const d=dateToDayIdx(l.date);
+        if(d>=0&&d<numDays) fixedMap[s.id].add(d);
+      }
+    });
+  });
+
   // Staff rows
   const staffRows=staff.map(s=>{
     const sched=schedule[s.id]||[];
@@ -1193,6 +1244,7 @@ function renderScheduleGrid(){
       if(dow===0) cellCls+=' sun';
       if(dow===6) cellCls+=' sat';
       if(holi) cellCls+=' holiday';
+      if(fixedMap[s.id]&&fixedMap[s.id].has(d)) cellCls+=' cell-pinned';
       const label=sh||'';
       const disp=sh==='OFF'?'○':sh==='주'?'주':sh==='수면'?'수':sh==='생휴'?'생':sh==='VAC'?'V':sh;
       if(REST_TYPES.has(sh)||!sh) offCount++;
