@@ -1,5 +1,5 @@
 // ER Schedule Service Worker — 오프라인 캐시
-const CACHE = 'er-schedule-v4';
+const CACHE = 'er-schedule-v5';
 const ASSETS = [
   '/',
   '/index.html',
