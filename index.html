@@ -1119,12 +1119,12 @@ function autoSchedule(){
     });
   }
 
-  // ── 다중 시도: 직원 순서 변경으로 최적해 탐색 (최대 3회) ──
+  // ── 다중 시도: 직원 순서 변경으로 최적해 탐색 (최대 10회) ──
   const _initSched={}, _initPs={};
   staff.forEach(s=>{ _initSched[s.id]=[...sched[s.id]]; _initPs[s.id]={...ps[s.id]}; });
   let _bestSchedResult=null, _bestSF=Infinity;
 
-  for(let _tryN=0;_tryN<3;_tryN++){
+  for(let _tryN=0;_tryN<10;_tryN++){
     // 1회 이후: 초기 상태 복원 + 직원 순서 셔플
     if(_tryN>0){
       staff.forEach(s=>{ sched[s.id]=[..._initSched[s.id]]; ps[s.id]={..._initPs[s.id]}; });
@@ -1789,11 +1789,12 @@ function autoSchedule(){
   removeOverflow();
   fillOnce();
 
-  // ── 다중 시도 평가: 이번 결과 shortfall 집계 ──
+  // ── 다중 시도 평가: 이번 결과 shortfall 집계 (D+E+N 모두) ──
   {
     let _sf=0;
     for(let d=0;d<numDays;d++){
       if(staff.filter(s=>sched[s.id][d]==='D').length<minStaff.D) _sf++;
+      if(staff.filter(s=>sched[s.id][d]==='E').length<minStaff.E) _sf++;
       if(staff.filter(s=>sched[s.id][d]==='N').length<minStaff.N) _sf++;
     }
     if(_sf<_bestSF){
@@ -1807,6 +1808,94 @@ function autoSchedule(){
 
   // 최고 결과 적용
   if(_bestSchedResult){ staff.forEach(s=>{ sched[s.id]=[..._bestSchedResult[s.id]]; }); }
+
+  // ══ 핵 최후보장: 10회 retry 후에도 남은 shortfall 강제 해결 ══
+  // 의무휴(isMR) · 잠금(isLkd) · 지정휴가만 존중, 나머지 soft 제약 전부 무시
+  {
+    const _LEAVESET=new Set(['VAC','주','생휴','수면','병가','법','중']);
+    const _canForce=(id,d)=>{
+      if(isLkd(id,d)) return false;
+      if(isMR(id,d)) return false;
+      if(_LEAVESET.has(sched[id][d])) return false;
+      return true;
+    };
+    // 핵 패스 (2회 반복 — 1회차 N배정으로 생긴 d+1/d+2 공백을 2회차에서 재보충)
+    for(let _np=0;_np<2;_np++){
+      for(let d=0;d<numDays;d++){
+        // ① N 먼저 (N 배정 시 d+1/d+2 OFF 전환 발생)
+        {
+          let ns=minStaff.N-staff.filter(s=>sched[s.id][d]==='N').length;
+          if(ns>0){
+            // OFF→N (isMR·isLkd·휴가만 체크, nMaxOf·noOverlap 무시)
+            for(const s of staff){
+              if(ns<=0) break;
+              if(sched[s.id][d]!=='OFF') continue;
+              if(!_canForce(s.id,d)) continue;
+              sched[s.id][d]='N';
+              if(d+1<numDays&&!isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) sched[s.id][d+1]='OFF';
+              if(d+2<numDays&&!isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E')) sched[s.id][d+2]='OFF';
+              ns--;
+            }
+            // D/E→N (해당 shift 잉여 있을 때만)
+            for(const s of [...staff].sort((a,b)=>sched[a.id].filter(x=>x==='N').length-sched[b.id].filter(x=>x==='N').length)){
+              if(ns<=0) break;
+              const sh=sched[s.id][d];
+              if(sh!=='D'&&sh!=='E') continue;
+              if(isLkd(s.id,d)) continue;
+              if(staff.filter(x=>sched[x.id][d]===sh).length<=minStaff[sh]) continue;
+              sched[s.id][d]='N';
+              if(d+1<numDays&&!isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) sched[s.id][d+1]='OFF';
+              if(d+2<numDays&&!isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E')) sched[s.id][d+2]='OFF';
+              ns--;
+            }
+          }
+        }
+        // ② D 보충 (E→D 위반 방지: d-1=E 제외)
+        {
+          let ds=minStaff.D-staff.filter(s=>sched[s.id][d]==='D').length;
+          if(ds>0){
+            for(const s of staff){
+              if(ds<=0) break;
+              if(sched[s.id][d]!=='OFF') continue;
+              if(!_canForce(s.id,d)) continue;
+              if(d>0&&sched[s.id][d-1]==='E') continue; // E→D 위반 방지
+              sched[s.id][d]='D';
+              ds--;
+            }
+            // E→D 변환 (d-1≠E인 E직원, E 잉여 있을 때)
+            if(ds>0){
+              for(const s of staff){
+                if(ds<=0) break;
+                if(sched[s.id][d]!=='E') continue;
+                if(isLkd(s.id,d)) continue;
+                if(d>0&&sched[s.id][d-1]==='E') continue;
+                if(staff.filter(x=>sched[x.id][d]==='E').length<=minStaff.E) continue;
+                sched[s.id][d]='D';
+                ds--;
+              }
+            }
+          }
+        }
+        // ③ E 보충
+        {
+          let es=minStaff.E-staff.filter(s=>sched[s.id][d]==='E').length;
+          if(es>0){
+            for(const s of staff){
+              if(es<=0) break;
+              if(sched[s.id][d]!=='OFF') continue;
+              if(!_canForce(s.id,d)) continue;
+              sched[s.id][d]='E';
+              if(d+1<numDays&&!isLkd(s.id,d+1)&&sched[s.id][d+1]==='D') sched[s.id][d+1]='OFF';
+              es--;
+            }
+          }
+        }
+      }
+    }
+    // 핵 패스 후 규칙 강제 + 한 번 더 보충
+    enforceRules();
+    fillOnce();
+  }
 
   state.schedule=sched;
 
