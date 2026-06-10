@@ -1499,55 +1499,95 @@ function autoSchedule(){
           .slice(0,dNeed).forEach(s=>{ sched[s.id][d]='D'; });
       }
 
-      // E 보충
-      const eNeed=minStaff.E-shCnt(d,'E');
-      if(eNeed>0){
-        staff.filter(s=>{
-          if(sched[s.id][d]!=='OFF') return false;
-          if(isLkd(s.id,d)||isMR(s.id,d)) return false;
-          if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='E')) return false;
-          // ★ 다음날이 D인 경우: 잠금 D는 무조건 제외, 비잠금 D는 D 여유가 있어야만 배정 허용
-          if(d+1<numDays&&sched[s.id][d+1]==='D'){
-            if(isLkd(s.id,d+1)) return false; // 잠금 → 변환 불가 → 제외
-            if(shCnt(d+1,'D')<=minStaff.D) return false; // D 여유 없음 → 변환 시 부족 → 제외
+      // ── E 보충 (동적 여유 체크 — for 루프로 실시간 shCnt 갱신) ──
+      {
+        const eNeed=minStaff.E-shCnt(d,'E');
+        if(eNeed>0){
+          // 1차 필터: 고정 불가 조건만 제거
+          const eCands=staff.filter(s=>{
+            if(sched[s.id][d]!=='OFF') return false;
+            if(isLkd(s.id,d)||isMR(s.id,d)) return false;
+            // 잠금된 D가 다음날이면 E→D 고정 위반 → 제외
+            if(d+1<numDays&&isLkd(s.id,d+1)&&sched[s.id][d+1]==='D') return false;
+            if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='E')) return false;
+            return true;
+          }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
+          // 2차: 동적 for 루프 — 배정/변환마다 shCnt 즉시 반영
+          let eAssigned=0;
+          for(const s of eCands){
+            if(eAssigned>=eNeed) break;
+            // 다음날 비잠금 D: 실시간 여유 재확인
+            if(d+1<numDays&&sched[s.id][d+1]==='D'&&!isLkd(s.id,d+1)){
+              if(shCnt(d+1,'D')<=minStaff.D) continue; // 여유 없음 → skip
+              sched[s.id][d]='E';
+              sched[s.id][d+1]='OFF'; // 여유 확인 후 변환
+            } else {
+              sched[s.id][d]='E';
+            }
+            eAssigned++;
           }
-          return true;
-        }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0))
-          .slice(0,eNeed).forEach(s=>{
-            sched[s.id][d]='E';
-            // ★ 다음날 D 변환 (여유 확인 완료, 비잠금만)
-            if(d+1<numDays&&sched[s.id][d+1]==='D'&&!isLkd(s.id,d+1)) sched[s.id][d+1]='OFF';
-          });
+        }
       }
 
-      // N 보충
-      const nNeed=minStaff.N-shCnt(d,'N');
-      if(nNeed>0){
-        staff.filter(s=>{
-          if(sched[s.id][d]!=='OFF') return false;
-          if(isLkd(s.id,d)||isMR(s.id,d)) return false;
-          if(sched[s.id].filter(x=>x==='N').length>=nMaxOf(s.id)) return false;
-          if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='N')) return false;
-          // ★ 다음날이 D/E인 경우: 잠금이면 제외, 비잠금이면 해당 근무 여유가 있어야만 배정 허용
-          if(d+1<numDays){
-            const nxtSh=sched[s.id][d+1];
-            if(nxtSh==='D'||nxtSh==='E'){
-              if(isLkd(s.id,d+1)) return false;
-              const nxtTarget=nxtSh==='D'?minStaff.D:minStaff.E;
-              if(shCnt(d+1,nxtSh)<=nxtTarget) return false; // 여유 없으면 제외
-            }
-          }
-          return true;
-        // ★ N 수 적은 사람 우선 → 공평한 N 분배
-        }).sort((a,b)=>sched[a.id].filter(x=>x==='N').length-sched[b.id].filter(x=>x==='N').length)
-          .slice(0,nNeed).forEach(s=>{
-            sched[s.id][d]='N';
-            // ★ 다음날 D/E 변환 (여유 확인 완료, 비잠금만)
-            if(d+1<numDays){
-              const nxtSh=sched[s.id][d+1];
-              if((nxtSh==='D'||nxtSh==='E')&&!isLkd(s.id,d+1)) sched[s.id][d+1]='OFF';
-            }
+      // ── N 보충 (동적 여유 체크 — d+1·d+2 모두 확인) ──
+      {
+        const nNeed=minStaff.N-shCnt(d,'N');
+        if(nNeed>0){
+          // 1차 필터: 고정 불가 조건만 제거
+          const nCands=staff.filter(s=>{
+            if(sched[s.id][d]!=='OFF') return false;
+            if(isLkd(s.id,d)||isMR(s.id,d)) return false;
+            if(sched[s.id].filter(x=>x==='N').length>=nMaxOf(s.id)) return false;
+            if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='N')) return false;
+            // d+1 잠금 D/E → 변환 불가 → 제외
+            if(d+1<numDays&&isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) return false;
+            // d+2 잠금 D/E → 변환 불가 → 제외
+            if(d+2<numDays&&isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E')) return false;
+            return true;
+          // ★ N 수 적은 사람 우선 (공평한 분배) + d+1이 OFF인 사람 우선(변환 불필요)
+          }).sort((a,b)=>{
+            const nA=sched[a.id].filter(x=>x==='N').length;
+            const nB=sched[b.id].filter(x=>x==='N').length;
+            if(nA!==nB) return nA-nB; // N 적은 순
+            // N 수 같으면: d+1이 OFF인 사람 우선
+            const d1A=d+1<numDays?sched[a.id][d+1]:null;
+            const d1B=d+1<numDays?sched[b.id][d+1]:null;
+            return (d1A==='OFF'?0:1)-(d1B==='OFF'?0:1);
           });
+          // 2차: 동적 for 루프 — 배정/변환마다 shCnt 즉시 반영
+          let nAssigned=0;
+          for(const s of nCands){
+            if(nAssigned>=nNeed) break;
+            const sid=s.id;
+            // d+1 비잠금 D/E: 실시간 여유 재확인
+            if(d+1<numDays&&!isLkd(sid,d+1)){
+              const sh1=sched[sid][d+1];
+              if(sh1==='D'||sh1==='E'){
+                const t1=sh1==='D'?minStaff.D:minStaff.E;
+                if(shCnt(d+1,sh1)<=t1) continue; // d+1 여유 없음 → skip
+              }
+            }
+            // d+2 비잠금 D/E: 실시간 여유 재확인
+            if(d+2<numDays&&!isLkd(sid,d+2)){
+              const sh2=sched[sid][d+2];
+              if(sh2==='D'||sh2==='E'){
+                const t2=sh2==='D'?minStaff.D:minStaff.E;
+                if(shCnt(d+2,sh2)<=t2) continue; // d+2 여유 없음 → skip
+              }
+            }
+            // 배정 + d+1, d+2 변환
+            sched[sid][d]='N';
+            if(d+1<numDays){
+              const sh1=sched[sid][d+1];
+              if((sh1==='D'||sh1==='E')&&!isLkd(sid,d+1)) sched[sid][d+1]='OFF';
+            }
+            if(d+2<numDays){
+              const sh2=sched[sid][d+2];
+              if((sh2==='D'||sh2==='E')&&!isLkd(sid,d+2)) sched[sid][d+2]='OFF';
+            }
+            nAssigned++;
+          }
+        }
       }
     }
   };
