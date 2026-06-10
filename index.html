@@ -299,7 +299,16 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
       <input class="auth-input" id="auth-password" type="password" placeholder="비밀번호" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')doLogin()">
       <div class="auth-err" id="auth-error"></div>
-      <button class="auth-btn" onclick="doLogin()">🔐 로그인</button>
+      <!-- 잠금 안내 (5회 실패 시 표시) -->
+      <div id="auth-locked-box" style="display:none;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:10px;text-align:left">
+        <div style="font-weight:700;color:#dc2626;margin-bottom:4px">🔒 계정이 잠겼습니다</div>
+        <div style="font-size:12px;color:#7f1d1d;line-height:1.6">비밀번호를 5회 이상 틀렸습니다.<br>관리자에게 문의하거나 잠시 후 다시 시도해주세요.</div>
+        <div id="auth-locked-admin" style="font-size:11px;color:#b91c1c;margin-top:6px"></div>
+        <button class="auth-btn" style="margin-top:10px;background:#dc2626;font-size:13px" onclick="unlockAfterTimer()">⏳ <span id="lock-timer-text">잠금 해제까지 대기 중...</span></button>
+      </div>
+      <div id="auth-attempts-hint" style="display:none;font-size:11px;color:#b45309;margin:-2px 0 6px;text-align:left"></div>
+      <button class="auth-btn" id="auth-login-btn" onclick="doLogin()">🔐 로그인</button>
+      <button class="auth-btn" style="margin-top:8px;background:#f1f5f9;color:#475569;font-size:12px;font-weight:600" onclick="hardRefresh()">🔄 앱 업데이트 / 캐시 새로고침</button>
     </div>
 
     <!-- 최초 설정 폼 (관리자 없을 때만 표시) -->
@@ -350,8 +359,9 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
   <div class="header-right">
     <span id="header-user" class="hide-mobile" style="font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap"></span>
     <span id="sync-indicator" title="Firebase 동기화 상태"></span>
-    <button class="btn-sm btn-primary hide-mobile" id="btn-save" onclick="saveState()">💾 저장</button>
+    <button class="btn-sm btn-primary" id="btn-save" onclick="saveState()" title="데이터 저장">💾 저장</button>
     <button class="btn-sm btn-warn hide-mobile" onclick="showPwModal()">👤 내 계정</button>
+    <button class="btn-sm" style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3)" onclick="hardRefresh()" title="앱 업데이트·캐시 초기화">🔄 업데이트</button>
     <button class="btn-sm btn-danger" onclick="doLogout()">로그아웃</button>
   </div>
 </header>
@@ -2477,6 +2487,92 @@ function deleteSnapshot(id){
 let currentUser = null;
 window._scheduleReadOnly = false;
 
+// ── 앱 강제 업데이트·캐시 초기화 ──────────────────────────────
+async function hardRefresh(){
+  try {
+    // 1) 모든 Service Worker 등록 해제
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+    // 2) Cache API 전체 삭제
+    if('caches' in window){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k=>caches.delete(k)));
+    }
+    // 3) 타임스탬프 붙여 강제 새로고침
+    const url = location.href.split('?')[0] + '?v=' + Date.now();
+    location.replace(url);
+  } catch(e){
+    location.reload(true);
+  }
+}
+
+// ── 로그인 잠금 관리 (5회 실패) ──────────────────────────────
+const LOCK_KEY    = 'er_lock_v1';
+const LOCK_LIMIT  = 5;
+const LOCK_SECS   = 300; // 5분 잠금
+
+function getLockState(){
+  try { return JSON.parse(localStorage.getItem(LOCK_KEY)||'{}'); } catch(e){ return {}; }
+}
+function saveLockState(obj){ localStorage.setItem(LOCK_KEY, JSON.stringify(obj)); }
+function clearLockState(){ localStorage.removeItem(LOCK_KEY); }
+
+function isLocked(){
+  const s = getLockState();
+  if(!s.lockedAt) return false;
+  const elapsed = (Date.now() - s.lockedAt) / 1000;
+  if(elapsed >= LOCK_SECS){ clearLockState(); return false; }
+  return true;
+}
+function remainSecs(){
+  const s = getLockState();
+  if(!s.lockedAt) return 0;
+  return Math.max(0, LOCK_SECS - Math.floor((Date.now() - s.lockedAt) / 1000));
+}
+
+function showLockUI(){
+  document.getElementById('auth-locked-box').style.display='block';
+  document.getElementById('auth-login-btn').style.display='none';
+  document.getElementById('auth-attempts-hint').style.display='none';
+  // 관리자 아이디 표시
+  try {
+    const auth = loadAuth();
+    const admins = auth.users.filter(u=>u.role==='admin').map(u=>u.displayName||u.username);
+    if(admins.length)
+      document.getElementById('auth-locked-admin').textContent = '관리자 계정: ' + admins.join(', ');
+  } catch(e){}
+  updateLockTimer();
+}
+function hideLockUI(){
+  document.getElementById('auth-locked-box').style.display='none';
+  document.getElementById('auth-login-btn').style.display='block';
+}
+
+let _lockTimerInterval = null;
+function updateLockTimer(){
+  clearInterval(_lockTimerInterval);
+  _lockTimerInterval = setInterval(()=>{
+    const rem = remainSecs();
+    const el = document.getElementById('lock-timer-text');
+    if(el) el.textContent = rem>0 ? `${Math.floor(rem/60)}분 ${rem%60}초 후 해제` : '잠금 해제됨 — 재시도하기';
+    if(rem<=0){ clearInterval(_lockTimerInterval); unlockAfterTimer(); }
+  }, 1000);
+}
+function unlockAfterTimer(){
+  if(remainSecs()>0) return; // 아직 시간 남음
+  clearLockState();
+  hideLockUI();
+  document.getElementById('auth-attempts-hint').style.display='none';
+}
+
+// ── 로그인 세션 유지 ──────────────────────────────────────────
+const SESSION_KEY = 'er_session_v1';
+function saveSession(userId){ localStorage.setItem(SESSION_KEY, userId); }
+function loadSession(){ return localStorage.getItem(SESSION_KEY); }
+function clearSession(){ localStorage.removeItem(SESSION_KEY); }
+
 // SHA-256 해싱 (Web Crypto API — 비동기)
 async function hashPw(pw){
   try {
@@ -2522,7 +2618,28 @@ function initAuth(){
     document.getElementById('auth-setup-form').style.display='block';
     document.getElementById('auth-login-form').style.display='none';
     document.getElementById('auth-subtitle').textContent='처음 사용하시네요! 관리자 계정을 설정해주세요';
+    document.getElementById('auth-overlay').style.display='flex';
+    return;
   }
+
+  // 잠금 상태 확인
+  if(isLocked()){
+    document.getElementById('auth-overlay').style.display='flex';
+    showLockUI();
+    return;
+  }
+
+  // 세션 자동 복원
+  const savedId = loadSession();
+  if(savedId){
+    const user = auth.users.find(u=>u.id===savedId);
+    if(user){
+      loginAs(user); // 자동 로그인 (overlay 안 뜸)
+      return;
+    }
+    clearSession(); // 계정이 삭제됐으면 세션 제거
+  }
+
   document.getElementById('auth-overlay').style.display='flex';
 }
 
@@ -2545,19 +2662,46 @@ async function doSetup(){
 }
 
 async function doLogin(){
+  const errEl = document.getElementById('auth-error');
+  errEl.style.display='none';
+
+  // 잠금 상태 확인
+  if(isLocked()){ showLockUI(); return; }
+
   const username = document.getElementById('auth-username').value.trim();
   const pw       = document.getElementById('auth-password').value;
-  const errEl    = document.getElementById('auth-error');
-  errEl.style.display='none';
   const auth = loadAuth();
   const hashed = await hashPw(pw);
   const user = auth.users.find(u=>u.username===username && u.passwordHash===hashed);
-  if(!user){ showAuthErr(errEl,'아이디 또는 비밀번호가 맞지 않아요'); return; }
+
+  if(!user){
+    // 실패 카운트 증가
+    const s = getLockState();
+    s.attempts = (s.attempts||0) + 1;
+    if(s.attempts >= LOCK_LIMIT){
+      s.lockedAt = Date.now();
+      saveLockState(s);
+      showLockUI();
+      showAuthErr(errEl, `비밀번호를 ${LOCK_LIMIT}회 틀렸습니다. 계정이 잠겼습니다.`);
+    } else {
+      saveLockState(s);
+      const remain = LOCK_LIMIT - s.attempts;
+      showAuthErr(errEl, '아이디 또는 비밀번호가 맞지 않아요');
+      const hintEl = document.getElementById('auth-attempts-hint');
+      hintEl.textContent = `⚠️ ${s.attempts}회 실패 — ${remain}회 더 틀리면 계정이 잠깁니다`;
+      hintEl.style.display = 'block';
+    }
+    return;
+  }
+  // 로그인 성공 → 잠금 초기화
+  clearLockState();
+  document.getElementById('auth-attempts-hint').style.display='none';
   loginAs(user);
 }
 
 function loginAs(user){
   currentUser = user;
+  saveSession(user.id); // ← 세션 유지
   document.getElementById('auth-overlay').style.display='none';
   document.getElementById('header-user').textContent =
     `${user.displayName||user.username}`;
@@ -2601,11 +2745,14 @@ function loginAs(user){
 }
 
 function doLogout(){
+  clearSession(); // ← 세션 제거
   currentUser = null;
   window._scheduleReadOnly = false;
   document.getElementById('auth-username').value='';
   document.getElementById('auth-password').value='';
   document.getElementById('auth-error').style.display='none';
+  document.getElementById('auth-attempts-hint').style.display='none';
+  hideLockUI();
   document.getElementById('auth-overlay').style.display='flex';
 }
 
