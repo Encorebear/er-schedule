@@ -110,6 +110,7 @@ input:focus,select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,2
 .shift-중{background:#e0e7ff;color:#3730a3}
 .shift-병가{background:#fee2e2;color:#991b1b}
 .cell-pinned{background:#fef08a!important;outline:2px solid #ca8a04!important;font-weight:800!important;color:#78350f!important}
+.cell-manual-lock{outline:2px solid #6366f1!important;}
 
 /* 집계 행 */
 .sum-row td{background:#f8fafc;font-weight:700;font-size:11px;color:#1e40af}
@@ -605,7 +606,8 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
 <div class="modal-bg" id="cell-modal">
   <div class="modal">
     <h3 id="modal-title">근무 변경</h3>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:4px" id="shift-picker"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px" id="shift-picker"></div>
+    <div id="cell-lock-area" style="margin-bottom:8px"></div>
     <div class="modal-footer">
       <button class="btn btn-gray" onclick="closeModal()">취소</button>
     </div>
@@ -633,6 +635,7 @@ let state = {
   holidays: [],     // [{date:'2024-09-16', type:'법', label:'추석'}]
   leaves: {},       // staffId -> [{date, type}]
   schedule: {},     // staffId -> [shift|null] length=days
+  manualOverrides: {}, // staffId -> {dayIdx: shift} — 수동 직접 입력 고정 (자동생성에도 유지)
 };
 
 let _modalStaffId = null, _modalDayIdx = null;
@@ -1063,14 +1066,47 @@ function autoSchedule(){
     };
   });
 
+  // ── 수동 고정 셀 적용 (자동생성 시에도 유지) ──
+  const manOvr = state.manualOverrides||{};
+  Object.keys(manOvr).forEach(id=>{
+    if(!sched[id]) return;
+    Object.keys(manOvr[id]).forEach(dStr=>{
+      const d=Number(dStr);
+      if(d>=0&&d<numDays&&manOvr[id][d]) sched[id][d]=manOvr[id][d];
+    });
+  });
+
   // ── 주휴 요일 고정 맵 (직원별 등록된 주 요일 Set: 0=일,1=월,...,6=토) ──
-  // 비어있으면 미등록 → 기존 7일 주기 동적 배정 유지
   const juhuDowMap={};
   staff.forEach(s=>{
     juhuDowMap[s.id]=new Set(
       (leaves[s.id]||[]).filter(l=>l.type==='주').map(l=>dayOfWeek(l.date))
     );
   });
+
+  // ── 주 미등록 직원 → 일관된 요일 자동배정 후 sched 선적용 ──
+  // 이렇게 하면 step⑥에서 동적 배정 없이도 주 요일이 4주 내내 고정됨
+  {
+    const dowCount=new Array(7).fill(0);
+    staff.forEach(s=>{ juhuDowMap[s.id].forEach(dow=>dowCount[dow]++); });
+    // 하루 최대 주 가능 인원 = 전체 - 필요 근무 최소값
+    const maxPerDow=Math.max(1, staff.length-(minStaff.D+minStaff.E+minStaff.N));
+    staff.forEach(s=>{
+      if(juhuDowMap[s.id].size>0) return; // 이미 등록됨
+      // 가장 배정이 적고 maxPerDow 미만인 DOW 선택
+      let best=-1, bestCnt=Infinity;
+      for(let dow=0;dow<7;dow++){
+        if(dowCount[dow]<maxPerDow&&dowCount[dow]<bestCnt){best=dow;bestCnt=dowCount[dow];}
+      }
+      if(best===-1) best=dowCount.indexOf(Math.min(...dowCount)); // 모두 한도 초과 시 최소값
+      juhuDowMap[s.id]=new Set([best]);
+      dowCount[best]++;
+      // 해당 요일 4주 전체에 '주' 선적용
+      for(let d=0;d<numDays;d++){
+        if(!sched[s.id][d]&&dayOfWeek(addDays(startDate,d))===best) sched[s.id][d]='주';
+      }
+    });
+  }
 
   // ── 메인 패스 ──
   for(let d=0;d<numDays;d++){
@@ -1262,23 +1298,25 @@ function autoSchedule(){
     const hi=Math.round(avgOff)+1;   // 허용 상한
     const lo=Math.floor(avgOff)-1;   // 허용 하한
 
-    // ① OFF 과다 → 여분 D/E 슬롯이 있는 날에 D/E로 전환
+    // ① OFF 과다 → D/E로 전환
+    // 소프트 최대치(min+2)까지 허용 — min 미달인 날만 변환하면 실효성 없음
+    const softMaxD=minStaff.D+2, softMaxE=minStaff.E+2;
     staff.slice().sort((a,b)=>pureOff(b.id)-pureOff(a.id)).forEach(s=>{
       const id=s.id;
       let off=pureOff(id);
       if(off<=hi) return;
       for(let d=0;d<numDays&&off>hi;d++){
         if(sched[id][d]==='OFF'){
-          if(adjDE[d].D<minStaff.D){
+          if(adjDE[d].D<softMaxD){
             sched[id][d]='D'; adjDE[d].D++; off--;
-          } else if(adjDE[d].E<minStaff.E){
+          } else if(adjDE[d].E<softMaxE){
             sched[id][d]='E'; adjDE[d].E++; off--;
           }
         }
       }
     });
 
-    // ② OFF 과소 → 일별 최소치 초과분 D/E를 OFF로 전환
+    // ② OFF 과소 → 잉여 D/E를 OFF로 전환 (일별 최소치 초과분에서만)
     staff.slice().sort((a,b)=>pureOff(a.id)-pureOff(b.id)).forEach(s=>{
       const id=s.id;
       let off=pureOff(id);
@@ -1319,7 +1357,16 @@ function groupRoundRobin(staffList, psRef){
     if(!buckets[s.group]) buckets[s.group]=[];
     buckets[s.group].push(s);
   });
-  const gKeys=Object.keys(buckets).sort((a,b)=>Number(a)-Number(b));
+  // 그룹 순서 결정: psRef 있으면 누적 workCount 평균 오름차순 (가장 적게 일한 그룹 우선)
+  // → 3그룹이 1,2그룹보다 적게 일했으면 3그룹이 앞으로 이동해 슬롯 확보
+  const gKeys=Object.keys(buckets).sort((a,b)=>{
+    if(psRef&&buckets[a].length>0&&buckets[b].length>0){
+      const avgA=buckets[a].reduce((s,x)=>s+(psRef[x.id]?.workCount||0),0)/buckets[a].length;
+      const avgB=buckets[b].reduce((s,x)=>s+(psRef[x.id]?.workCount||0),0)/buckets[b].length;
+      if(Math.abs(avgA-avgB)>=0.5) return avgA-avgB;
+    }
+    return Number(a)-Number(b);
+  });
   // 버킷 내 workCount 오름차순 정렬
   gKeys.forEach(g=>{
     if(psRef){
@@ -1618,11 +1665,13 @@ function renderScheduleGrid(){
       if(dow===6) cellCls+=' sat';
       if(holi) cellCls+=' holiday';
       if(fixedMap[s.id]&&fixedMap[s.id].has(d)) cellCls+=' cell-pinned';
+      const isManualLocked=!!(state.manualOverrides?.[s.id]?.[d]);
+      if(isManualLocked) cellCls+=' cell-manual-lock';
       const label=sh||'';
       const disp=sh==='OFF'?'○':sh==='주'?'주':sh==='수면'?'수':sh==='생휴'?'생':sh==='VAC'?'V':sh;
       if(REST_TYPES.has(sh)||!sh) offCount++;
       if(sh==='N') nCount++;
-      return `<td class="${cellCls}" onclick="openCellModal('${s.id}',${d})" title="${fmtDate(date)} ${sh||'미배정'}">${disp}</td>`;
+      return `<td class="${cellCls}" onclick="openCellModal('${s.id}',${d})" title="${fmtDate(date)} ${sh||'미배정'}${isManualLocked?' 🔒':''}">${disp}${isManualLocked?'<span style="font-size:7px;vertical-align:super">🔒</span>':''}</td>`;
     }).join('');
     const restCount=sched.filter(sh=>REST_TYPES.has(sh)).length;
     return `<tr>
@@ -1672,8 +1721,9 @@ function openCellModal(staffId, dayIdx){
   _modalDayIdx=dayIdx;
   const s=state.staff.find(x=>x.id===staffId);
   const date=addDays(state.period.start,dayIdx);
+  const isLocked=!!(state.manualOverrides?.[staffId]?.[dayIdx]);
   document.getElementById('modal-title').textContent=
-    `${s.name} · ${fmtDate(date)} (${DOW_KR(dayOfWeek(date))})`;
+    `${s.name} · ${fmtDate(date)} (${DOW_KR(dayOfWeek(date))})${isLocked?' 🔒':''}`;
   const current=state.schedule[staffId]?.[dayIdx]||'';
   document.getElementById('shift-picker').innerHTML=
     [...SHIFTS,'(비우기)'].map(sh=>`
@@ -1683,14 +1733,36 @@ function openCellModal(staffId, dayIdx){
         <span class="leg-dot shift-${sh}" style="width:20px;height:20px;border-radius:4px;font-size:10px">${sh==='OFF'?'○':sh||'✕'}</span>
         ${sh==='(비우기)'?'비우기':sh}
       </button>`).join('');
+  // 잠금 상태 안내 및 해제 버튼
+  const lockArea=document.getElementById('cell-lock-area');
+  if(lockArea){
+    lockArea.innerHTML=isLocked
+      ?`<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px;font-size:12px;color:#92400e">
+          🔒 수동 고정됨 — 자동생성 시에도 유지됩니다<br>
+          <button class="btn btn-gray" style="margin-top:6px;font-size:12px" onclick="clearCellLock('${staffId}',${dayIdx})">잠금 해제</button>
+        </div>`
+      :`<div style="font-size:11px;color:#6b7280">근무 선택 시 자동생성에서도 이 값이 유지됩니다 🔒</div>`;
+  }
   document.getElementById('cell-modal').classList.add('open');
 }
 function setCellShift(sh){
   if(!state.schedule[_modalStaffId]) state.schedule[_modalStaffId]=new Array(state.period.days).fill(null);
   state.schedule[_modalStaffId][_modalDayIdx]=sh||null;
+  // 수동 수정 고정 기록 — 자동생성 시에도 이 셀 값 유지
+  if(!state.manualOverrides) state.manualOverrides={};
+  if(!state.manualOverrides[_modalStaffId]) state.manualOverrides[_modalStaffId]={};
+  if(sh){ state.manualOverrides[_modalStaffId][_modalDayIdx]=sh; }
+  else { delete state.manualOverrides[_modalStaffId][_modalDayIdx]; }
   closeModal();
   renderScheduleGrid();
   saveState(true);
+}
+function clearCellLock(staffId, dayIdx){
+  if(state.manualOverrides?.[staffId]) delete state.manualOverrides[staffId][dayIdx];
+  closeModal();
+  renderScheduleGrid();
+  saveState(true);
+  toast('잠금 해제됐어요');
 }
 function closeModal(){ document.getElementById('cell-modal').classList.remove('open'); }
 document.getElementById('cell-modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
