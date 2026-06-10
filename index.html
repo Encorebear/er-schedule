@@ -1022,8 +1022,8 @@ function autoSchedule(){
   // ── 그룹 정보 & 1근무당 그룹 상한 ──
   const allGroups=[...new Set(staff.map(s=>s.group))].sort((a,b)=>Number(a)-Number(b));
   const numGroups=allGroups.length||1;
-  // 한 근무 타입에 동일 그룹이 차지할 수 있는 최대 인원 (전체 요건의 60% + 1)
-  const grpCap=(target)=>Math.max(1, Math.ceil(target*0.6)+1);
+  // 한 그룹이 한 근무에 차지할 수 있는 최대 인원: ceil(target/그룹수)+1 (버퍼 1명)
+  const grpCap=(target)=>Math.max(1, Math.ceil(target/numGroups)+1);
 
   // ── 초기화 ──
   const sched={};
@@ -1059,7 +1059,17 @@ function autoSchedule(){
       hadRestSinceJuhu: true,
       workCount:  0,
       nCount:     0,
+      offCount:   0,   // OFF 균등화 추적
     };
+  });
+
+  // ── 주휴 요일 고정 맵 (직원별 등록된 주 요일 Set: 0=일,1=월,...,6=토) ──
+  // 비어있으면 미등록 → 기존 7일 주기 동적 배정 유지
+  const juhuDowMap={};
+  staff.forEach(s=>{
+    juhuDowMap[s.id]=new Set(
+      (leaves[s.id]||[]).filter(l=>l.type==='주').map(l=>dayOfWeek(l.date))
+    );
   });
 
   // ── 메인 패스 ──
@@ -1170,11 +1180,23 @@ function autoSchedule(){
       if(juniorIds.has(id)) jCnt.E++;
     }
 
-    // ⑥ 나머지 미배정자 전원 → 주휴 or OFF
+    // ⑥ 나머지 미배정자 전원 → 주휴(등록 요일 한정) or OFF
+    // ▶ 주 등록 직원: 반드시 등록 요일에만 주 배정 (다른 요일은 무조건 OFF)
+    //   → 잎 확장에서 이미 설정된 날은 null 아니므로 이 단계엔 오지 않음
+    //   → 만약 잎 확장에서 누락된 동일 요일이 있으면 안전망으로 여기서 처리
+    // ▶ 주 미등록 직원: 7일 주기 동적 배정 (기존 방식)
     staff.forEach(s=>{
       if(sched[s.id][d]!==null) return;
       const p=ps[s.id];
-      const sh=d-p.lastJuhuDay>=7?'주':'OFF';
+      const jDows=juhuDowMap[s.id];
+      let sh;
+      if(jDows.size>0){
+        // 등록된 주 요일 중 하나인 경우에만 주 배정 (다른 요일은 무조건 OFF)
+        sh=jDows.has(dayOfWeek(addDays(startDate,d)))?'주':'OFF';
+      } else {
+        // 미등록: 7일 간격 경과 시 주, 아니면 OFF
+        sh=d-p.lastJuhuDay>=7?'주':'OFF';
+      }
       sched[s.id][d]=sh;
       if(sh==='주'){ p.lastJuhuDay=d; p.hadRestSinceJuhu=false; }
       else p.hadRestSinceJuhu=true;
@@ -1193,6 +1215,7 @@ function autoSchedule(){
         p.nStreak=0; p.nCommit=0; p.workCount++;
       } else {
         p.nStreak=0; p.nCommit=0;
+        p.offCount++;   // OFF/주/휴가 등 비근무일 카운트 (균등화용)
         if(p.restNeeded>0) p.restNeeded--;
         if(sh==='주'){ p.lastJuhuDay=d; p.hadRestSinceJuhu=false; }
         else p.hadRestSinceJuhu=true;
@@ -1219,6 +1242,57 @@ function autoSchedule(){
       }
     }
   });
+
+  // ── 후처리: OFF 균등화 ──
+  // 사전신청/법정 고정 휴가(VAC·생휴·수면·병가·법·주·중)는 건드리지 않음
+  // 순수 'OFF' 배정만 재분배: D/E ↔ OFF 교환
+  {
+    // 일별 D/E 실제 카운트 (재배정용)
+    const adjDE={};
+    for(let d=0;d<numDays;d++){
+      adjDE[d]={D:0,E:0};
+      staff.forEach(s=>{
+        if(sched[s.id][d]==='D') adjDE[d].D++;
+        if(sched[s.id][d]==='E') adjDE[d].E++;
+      });
+    }
+    const pureOff=id=>sched[id].filter(sh=>sh==='OFF').length;
+    const offArr=staff.map(s=>pureOff(s.id));
+    const avgOff=offArr.reduce((a,b)=>a+b,0)/staff.length;
+    const hi=Math.round(avgOff)+1;   // 허용 상한
+    const lo=Math.floor(avgOff)-1;   // 허용 하한
+
+    // ① OFF 과다 → 여분 D/E 슬롯이 있는 날에 D/E로 전환
+    staff.slice().sort((a,b)=>pureOff(b.id)-pureOff(a.id)).forEach(s=>{
+      const id=s.id;
+      let off=pureOff(id);
+      if(off<=hi) return;
+      for(let d=0;d<numDays&&off>hi;d++){
+        if(sched[id][d]==='OFF'){
+          if(adjDE[d].D<minStaff.D){
+            sched[id][d]='D'; adjDE[d].D++; off--;
+          } else if(adjDE[d].E<minStaff.E){
+            sched[id][d]='E'; adjDE[d].E++; off--;
+          }
+        }
+      }
+    });
+
+    // ② OFF 과소 → 일별 최소치 초과분 D/E를 OFF로 전환
+    staff.slice().sort((a,b)=>pureOff(a.id)-pureOff(b.id)).forEach(s=>{
+      const id=s.id;
+      let off=pureOff(id);
+      if(off>=lo) return;
+      for(let d=numDays-1;d>=0&&off<lo;d--){
+        const sh=sched[id][d];
+        if(sh==='D'&&adjDE[d].D>minStaff.D){
+          sched[id][d]='OFF'; adjDE[d].D--; off++;
+        } else if(sh==='E'&&adjDE[d].E>minStaff.E){
+          sched[id][d]='OFF'; adjDE[d].E--; off++;
+        }
+      }
+    });
+  }
 
   state.schedule=sched;
 
@@ -1249,7 +1323,14 @@ function groupRoundRobin(staffList, psRef){
   // 버킷 내 workCount 오름차순 정렬
   gKeys.forEach(g=>{
     if(psRef){
-      buckets[g].sort((a,b)=>((psRef[a.id]?.workCount||0)-(psRef[b.id]?.workCount||0)));
+      // 1차: workCount 오름차순 (적게 일한 사람 우선)
+      // 2차: offCount 내림차순 (같은 workCount이면 쉰 날 더 많은 사람에게 근무 우선)
+      buckets[g].sort((a,b)=>{
+        const wa=psRef[a.id]?.workCount||0, wb=psRef[b.id]?.workCount||0;
+        if(wa!==wb) return wa-wb;
+        const oa=psRef[a.id]?.offCount||0, ob=psRef[b.id]?.offCount||0;
+        return ob-oa;
+      });
     } else {
       for(let i=buckets[g].length-1;i>0;i--){
         const j=Math.floor(Math.random()*(i+1));
