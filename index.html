@@ -1532,7 +1532,7 @@ function autoSchedule(){
         }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0))
           .slice(0,dNeed).forEach(s=>{ sched[s.id][d]='D'; });
       }
-      // ★ 최후수단: D 여전히 부족 + E 잉여 → 당일 E→D 변환 (E→D 연속 규칙은 다음날 기준이므로 당일은 무관)
+      // ★ 최후수단: D 여전히 부족 + E 잉여 → 당일 E→D 변환
       {
         const dStill=minStaff.D-shCnt(d,'D');
         if(dStill>0){
@@ -1541,6 +1541,34 @@ function autoSchedule(){
             const toConv=Math.min(dStill,eSurplus);
             staff.filter(s=>sched[s.id][d]==='E'&&!isLkd(s.id,d))
               .slice(0,toConv).forEach(s=>{ sched[s.id][d]='D'; });
+          }
+        }
+      }
+      // ★★ 최후수단2: D 여전히 부족 + E가 최소치 + E→D금지 OFF직원 존재
+      // → E직원(전날E 아님)→D 변환, E→D금지 OFF직원→E 배정 (E총수 유지)
+      {
+        const dStill2=minStaff.D-shCnt(d,'D');
+        if(dStill2>0 && shCnt(d,'E')>=minStaff.E){
+          // E→D금지 OFF 직원: 전날E, 의무휴 아님, 미잠금
+          const edBanOff=staff.filter(s=>
+            sched[s.id][d]==='OFF'&&!isLkd(s.id,d)&&!isMR(s.id,d)&&
+            d>0&&sched[s.id][d-1]==='E'&&
+            // 내일 D 있으면 E→D 위반 발생 → 내일 D 여유 있을 때만 허용
+            !(d+1<numDays&&sched[s.id][d+1]==='D'&&shCnt(d+1,'D')<=minStaff.D)
+          );
+          // D로 이동 가능한 E 직원: 전날E 아님, 미잠금, noOverlap 충돌 없음
+          const eToDCands=staff.filter(s=>
+            sched[s.id][d]==='E'&&!isLkd(s.id,d)&&
+            !(d>0&&sched[s.id][d-1]==='E')&&
+            !(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='D'))
+          );
+          const swapCnt=Math.min(dStill2,edBanOff.length,eToDCands.length);
+          for(let i=0;i<swapCnt;i++){
+            const ew=eToDCands[i], ow=edBanOff[i];
+            sched[ew.id][d]='D';
+            sched[ow.id][d]='E';
+            // 내일 ow가 D이면 E→D 위반 → OFF 변환 (여유 이미 확인)
+            if(d+1<numDays&&sched[ow.id][d+1]==='D'&&!isLkd(ow.id,d+1)) sched[ow.id][d+1]='OFF';
           }
         }
       }
@@ -1667,6 +1695,43 @@ function autoSchedule(){
             if(d+1<numDays){const sh1=sched[sid][d+1];if((sh1==='D'||sh1==='E')&&!isLkd(sid,d+1)) sched[sid][d+1]='OFF';}
             if(d+2<numDays){const sh2=sched[sid][d+2];if((sh2==='D'||sh2==='E')&&!isLkd(sid,d+2)) sched[sid][d+2]='OFF';}
             nConv++;
+          }
+        }
+      }
+      // ★★ 최후수단: N 여전히 부족 + E→D금지 OFF직원 있으면
+      // → E직원→N 변환, E→D금지 OFF직원→E 배정 (E총수 유지)
+      {
+        const nStill2=minStaff.N-shCnt(d,'N');
+        if(nStill2>0){
+          const edBanOffN=staff.filter(s=>
+            sched[s.id][d]==='OFF'&&!isLkd(s.id,d)&&!isMR(s.id,d)&&
+            d>0&&sched[s.id][d-1]==='E'&&
+            !(d+1<numDays&&sched[s.id][d+1]==='D'&&shCnt(d+1,'D')<=minStaff.D)
+          );
+          // N으로 이동 가능한 E 직원: N최대 미도달, d+1/d+2 여유 있음
+          const eToNCands=staff.filter(s=>{
+            if(sched[s.id][d]!=='E'||isLkd(s.id,d)) return false;
+            if(sched[s.id].filter(x=>x==='N').length>=nMaxOf(s.id)) return false;
+            if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='N')) return false;
+            if(d+1<numDays&&isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) return false;
+            if(d+2<numDays&&isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E')) return false;
+            // d+1/d+2 D/E 여유 체크
+            if(d+1<numDays&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')){
+              const sh1=sched[s.id][d+1]; if(shCnt(d+1,sh1)<=( sh1==='D'?minStaff.D:minStaff.E)) return false;
+            }
+            if(d+2<numDays&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E')){
+              const sh2=sched[s.id][d+2]; if(shCnt(d+2,sh2)<=(sh2==='D'?minStaff.D:minStaff.E)) return false;
+            }
+            return true;
+          }).sort((a,b)=>sched[a.id].filter(x=>x==='N').length-sched[b.id].filter(x=>x==='N').length);
+          const swapCntN=Math.min(nStill2,edBanOffN.length,eToNCands.length);
+          for(let i=0;i<swapCntN;i++){
+            const ew=eToNCands[i], ow=edBanOffN[i];
+            sched[ew.id][d]='N';
+            if(d+1<numDays){const sh1=sched[ew.id][d+1];if((sh1==='D'||sh1==='E')&&!isLkd(ew.id,d+1)) sched[ew.id][d+1]='OFF';}
+            if(d+2<numDays){const sh2=sched[ew.id][d+2];if((sh2==='D'||sh2==='E')&&!isLkd(ew.id,d+2)) sched[ew.id][d+2]='OFF';}
+            sched[ow.id][d]='E';
+            if(d+1<numDays&&sched[ow.id][d+1]==='D'&&!isLkd(ow.id,d+1)) sched[ow.id][d+1]='OFF';
           }
         }
       }
