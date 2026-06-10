@@ -1759,25 +1759,42 @@ function autoSchedule(){
     fillOnce();
   }
 
-  // ── 단독 OFF 연속화 (하루만 OFF이고 앞뒤 근무인 패턴 → OFF 확장) ──
+  // ── OFF 블록화: 쉬는 날 2~3일 연속 묶기 (순방향·역방향 3패스) ──
+  // 규칙: D/E 잉여(>minStaff)일 때만 OFF로 전환 → shortfall 절대 미발생
   {
-    const REST_VALS=new Set(['OFF','주','VAC','생휴','수면','병가','법','중']);
-    for(let pass=0;pass<2;pass++){
+    const _RV=new Set(['OFF','주','VAC','생휴','수면','병가','법','중']);
+    // 연속 OFF 최대 블록 길이 계산 헬퍼
+    const offBlock=(id,d)=>{
+      let len=0;
+      for(let i=d;i>=0&&_RV.has(sched[id][i]);i--) len++;
+      for(let i=d+1;i<numDays&&_RV.has(sched[id][i]);i++) len++;
+      return len;
+    };
+    for(let _op=0;_op<3;_op++){
+      // ① 순방향: REST 블록 → 다음날 D/E 잉여 있으면 OFF 연장
       staff.forEach(s=>{
         const id=s.id;
-        for(let d=1;d<numDays-1;d++){
-          const cur=sched[id][d];
-          if(!REST_VALS.has(cur)) continue;
-          if(isLkd(id,d)) continue;
-          if(isMR(id,d)) continue; // ★ N 이후 의무 휴무는 연속화 대상 제외
-          const prevSh=sched[id][d-1], nextSh=sched[id][d+1];
-          if(!(prevSh==='D'||prevSh==='E'||prevSh==='N')) continue;
-          if(!(nextSh==='D'||nextSh==='E'||nextSh==='N')) continue;
-          if(isLkd(id,d+1)) continue;
-          const nxtTarget=nextSh==='D'?minStaff.D:nextSh==='E'?minStaff.E:minStaff.N;
-          if(shCnt(d+1,nextSh)>nxtTarget){
-            sched[id][d+1]='OFF';
-            d++; // ★ 캐스케이드 방지
+        for(let d=0;d<numDays-1;d++){
+          if(!_RV.has(sched[id][d])) continue;
+          if(isMR(id,d)) continue;
+          const nxt=sched[id][d+1];
+          if((nxt==='D'||nxt==='E')&&!isLkd(id,d+1)&&!isMR(id,d+1)){
+            // 이미 3일 이상 연속 OFF면 더 늘리지 않음
+            if(offBlock(id,d)>=3) continue;
+            if(shCnt(d+1,nxt)>minStaff[nxt]) sched[id][d+1]='OFF';
+          }
+        }
+      });
+      // ② 역방향: REST 블록 → 이전날 D/E 잉여 있으면 OFF 연장
+      staff.forEach(s=>{
+        const id=s.id;
+        for(let d=numDays-1;d>0;d--){
+          if(!_RV.has(sched[id][d])) continue;
+          if(isMR(id,d)) continue;
+          const prv=sched[id][d-1];
+          if((prv==='D'||prv==='E')&&!isLkd(id,d-1)&&!isMR(id,d-1)){
+            if(offBlock(id,d)>=3) continue;
+            if(shCnt(d-1,prv)>minStaff[prv]) sched[id][d-1]='OFF';
           }
         }
       });
