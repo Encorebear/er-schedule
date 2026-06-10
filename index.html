@@ -1505,14 +1505,17 @@ function autoSchedule(){
         staff.filter(s=>{
           if(sched[s.id][d]!=='OFF') return false;
           if(isLkd(s.id,d)||isMR(s.id,d)) return false;
-          // ★ 다음날 잠금 D면 E 배정 불가 (E→D 고정 위반 생성 방지)
-          if(d+1<numDays&&isLkd(s.id,d+1)&&sched[s.id][d+1]==='D') return false;
           if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='E')) return false;
+          // ★ 다음날이 D인 경우: 잠금 D는 무조건 제외, 비잠금 D는 D 여유가 있어야만 배정 허용
+          if(d+1<numDays&&sched[s.id][d+1]==='D'){
+            if(isLkd(s.id,d+1)) return false; // 잠금 → 변환 불가 → 제외
+            if(shCnt(d+1,'D')<=minStaff.D) return false; // D 여유 없음 → 변환 시 부족 → 제외
+          }
           return true;
         }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0))
           .slice(0,eNeed).forEach(s=>{
             sched[s.id][d]='E';
-            // ★ 다음날 비잠금 D면 즉시 OFF 변환 (E→D 위반 사전 방지)
+            // ★ 다음날 D 변환 (여유 확인 완료, 비잠금만)
             if(d+1<numDays&&sched[s.id][d+1]==='D'&&!isLkd(s.id,d+1)) sched[s.id][d+1]='OFF';
           });
       }
@@ -1524,17 +1527,25 @@ function autoSchedule(){
           if(sched[s.id][d]!=='OFF') return false;
           if(isLkd(s.id,d)||isMR(s.id,d)) return false;
           if(sched[s.id].filter(x=>x==='N').length>=nMaxOf(s.id)) return false;
-          // ★ 다음날 잠금 D/E면 N 배정 불가
-          if(d+1<numDays&&isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) return false;
           if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='N')) return false;
+          // ★ 다음날이 D/E인 경우: 잠금이면 제외, 비잠금이면 해당 근무 여유가 있어야만 배정 허용
+          if(d+1<numDays){
+            const nxtSh=sched[s.id][d+1];
+            if(nxtSh==='D'||nxtSh==='E'){
+              if(isLkd(s.id,d+1)) return false;
+              const nxtTarget=nxtSh==='D'?minStaff.D:minStaff.E;
+              if(shCnt(d+1,nxtSh)<=nxtTarget) return false; // 여유 없으면 제외
+            }
+          }
           return true;
         // ★ N 수 적은 사람 우선 → 공평한 N 분배
         }).sort((a,b)=>sched[a.id].filter(x=>x==='N').length-sched[b.id].filter(x=>x==='N').length)
           .slice(0,nNeed).forEach(s=>{
             sched[s.id][d]='N';
-            // ★ 다음날 비잠금 D/E면 즉시 OFF 변환 (N→D/E 위반 사전 방지)
-            if(d+1<numDays&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')&&!isLkd(s.id,d+1)){
-              sched[s.id][d+1]='OFF';
+            // ★ 다음날 D/E 변환 (여유 확인 완료, 비잠금만)
+            if(d+1<numDays){
+              const nxtSh=sched[s.id][d+1];
+              if((nxtSh==='D'||nxtSh==='E')&&!isLkd(s.id,d+1)) sched[s.id][d+1]='OFF';
             }
           });
       }
