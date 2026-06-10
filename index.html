@@ -1014,7 +1014,7 @@ function autoSchedule(){
   const NO_OVERLAP_NAMES = new Set(['이경희','오선영','우영미']);
   const JUNIOR_NAMES     = new Set(['이유진','이창성','백지선','정진우','김민아','장미선']);
   const N_MAX_OVERRIDE   = {'이경희':3,'오선영':4};
-  const N_PER_MIN=3, N_PER_MAX=8, JUNIOR_SHIFT_MAX=3;
+  const N_PER_MIN=5, N_PER_MAX=7, JUNIOR_SHIFT_MAX=3; // N 1인당 최소5·최대7 (N_MAX_OVERRIDE 대상 제외)
   // 하루 N 절대 상한: 설정값 + 2 (nCommit 연속 허용 버퍼)
   const N_DAY_MAX = minStaff.N + 2;
 
@@ -1196,6 +1196,8 @@ function autoSchedule(){
     for(const s of dPool){
       if(cnt.D>=minStaff.D) break;
       const id=s.id;
+      // ★ E→D 절대 불가: 전날 이브닝 근무자는 당일 D 배정 금지
+      if(d>0&&sched[id][d-1]==='E') continue;
       if(noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='D')) continue;
       if(juniorIds.has(id)&&jCnt.D>=JUNIOR_SHIFT_MAX) continue;
       if((grpCntD[s.group]||0)>=capD) continue; // 그룹 상한
@@ -1266,13 +1268,17 @@ function autoSchedule(){
 
   staff.forEach(s=>{
     const id=s.id;
+    // 이 직원의 N 최소 목표: 개인 최대(nMaxOf)와 전역 최소(N_PER_MIN) 중 작은 값
+    const nTarget=Math.min(N_PER_MIN, nMaxOf(id));
     let nCnt=sched[id].filter(sh=>sh==='N').length;
-    if(nCnt>=N_PER_MIN) return;
-    for(let d=0;d<numDays-1&&nCnt<N_PER_MIN;d++){
+    if(nCnt>=nTarget) return;
+    for(let d=0;d<numDays-1&&nCnt<nTarget;d++){
       if(['D','E'].includes(sched[id][d])&&['D','E'].includes(sched[id][d+1])){
         if(nCnt>=nMaxOf(id)) break;
         // 양쪽 날 모두 일별 상한 미만인 경우에만 N으로 교체
         if(dayCntN[d]>=minStaff.N||dayCntN[d+1]>=minStaff.N) continue;
+        // E→D 패턴 방지: D[d]→N, D[d+1]→N 교체 후 d+2가 D이면 문제 없음
+        // 하지만 N→D는 별도 강제 패스에서 처리하므로 여기서는 일단 교체
         sched[id][d]='N'; sched[id][d+1]='N'; nCnt+=2;
         dayCntN[d]++; dayCntN[d+1]++;
         d++;
@@ -1310,13 +1316,15 @@ function autoSchedule(){
         if(sched[id][d]==='OFF'){
           // ★ N 후 의무 휴무 보호: 전날 N이면 절대 D/E로 바꾸지 않음
           if(d>0&&sched[id][d-1]==='N') continue;
-          // ★ N 2연속 후 2일 의무 휴무 보호: 2일 전이 N이고 전날이 비근무면 2번째 의무휴무
+          // ★ N 2연속 후 2일 의무 휴무 보호
           if(d>1&&sched[id][d-2]==='N'&&sched[id][d-1]!=='D'&&sched[id][d-1]!=='E') continue;
+          // ★ E→D 절대 불가: 전날 E이면 D로 전환 불가
+          const prevE=d>0&&sched[id][d-1]==='E';
           // ★ noOverlap 직원: D/E에 이미 겹침 금지 동료 있으면 해당 시프트 스킵
           const isNoOvl=noOverlapIds.has(id);
           const noOvlD=isNoOvl&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='D');
           const noOvlE=isNoOvl&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d]==='E');
-          if(adjDE[d].D<softMaxD&&!noOvlD){
+          if(!prevE&&adjDE[d].D<softMaxD&&!noOvlD){
             sched[id][d]='D'; adjDE[d].D++; off--;
           } else if(adjDE[d].E<softMaxE&&!noOvlE){
             sched[id][d]='E'; adjDE[d].E++; off--;
@@ -1341,14 +1349,19 @@ function autoSchedule(){
     });
   }
 
-  // ── 후처리: N 규칙 강제 적용 ──
+  // ── 후처리: N 규칙 + E→D 규칙 강제 적용 ──
   // (1) N 직후 D/E 절대 불가 (N→D, N→E)
-  // (2) N→OFF→D/E 패턴 절대 불가 (나이트 오프 데이 금지)
-  //     → 나이트 후 무조건 2일은 D/E 배정 불가 (OFF·주·VAC 등 휴무만 허용)
+  // (2) N→OFF→D/E 패턴 절대 불가 (나이트 후 2일 D/E 금지)
   // (3) 연속 N 2개 이상 → 이후 2일은 D·E·N 모두 불가
+  // (4) E 직후 D 절대 불가 (E→D)
   {
     staff.forEach(s=>{
       const id=s.id;
+      // (4) E→D 강제 제거
+      for(let d=1;d<numDays;d++){
+        if(sched[id][d-1]==='E'&&sched[id][d]==='D') sched[id][d]='OFF';
+      }
+      // (1)(2)(3) N 규칙
       let d=0;
       while(d<numDays){
         if(sched[id][d]==='N'){
@@ -1429,13 +1442,15 @@ function autoSchedule(){
   // ── 후처리: 일별 최소 인원 보충 ──
   // 규칙 강제 패스(N→OFF, noOverlap→OFF)로 줄어든 D/E/N 인원을 OFF 직원에서 보충
   {
-    // N 후 의무 휴무 보호 판단 함수
+    // 의무 휴무 보호 판단 함수 (N 후 2일 보호)
     const isMandatoryRest=(id,d2)=>{
       if(d2>0&&sched[id][d2-1]==='N') return true;           // N 직후 1일차
       if(d2>1&&sched[id][d2-2]==='N'&&                       // N 직후 2일차
          sched[id][d2-1]!=='D'&&sched[id][d2-1]!=='E') return true;
       return false;
     };
+    // E→D 금지 판단 함수
+    const isEtoD=(id,d2)=>d2>0&&sched[id][d2-1]==='E';
     // 수동 잠금 셀은 보충 대상에서 제외
     const manOvrRef=state.manualOverrides||{};
     const isLocked=(id,d2)=>!!(manOvrRef[id]&&manOvrRef[id][d2]);
@@ -1452,6 +1467,7 @@ function autoSchedule(){
           if(sched[s.id][d]!=='OFF') return false;
           if(isLocked(s.id,d)) return false;
           if(isMandatoryRest(s.id,d)) return false;
+          if(isEtoD(s.id,d)) return false; // ★ E→D 절대 불가
           if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='D')) return false;
           return true;
         }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
@@ -1502,10 +1518,15 @@ function autoSchedule(){
     }
   }
 
-  // ── 최종 정리 ①: fill pass 이후 N→OFF→D/E 패턴 재강제 ──
+  // ── 최종 정리 ①: fill pass 이후 N→OFF→D/E 및 E→D 패턴 재강제 ──
   {
     staff.forEach(s=>{
       const id=s.id;
+      // E→D 제거
+      for(let d=1;d<numDays;d++){
+        if(sched[id][d-1]==='E'&&sched[id][d]==='D') sched[id][d]='OFF';
+      }
+      // N 규칙
       let d=0;
       while(d<numDays){
         if(sched[id][d]==='N'){
@@ -1532,6 +1553,95 @@ function autoSchedule(){
           onShift.sort((a,b)=>(ps[b.id]?.workCount||0)-(ps[a.id]?.workCount||0));
           for(let i=0;i<onShift.length-target;i++) sched[onShift[i].id][d]='OFF';
         }
+      }
+    }
+  }
+
+  // ── 최종 정리 ③: 단독 OFF 연속화 (하루쉬고·하루일하고 패턴 제거) ──
+  // 순수 OFF가 1일만 있고 앞뒤가 근무인 경우, 인접일 인원이 minStaff 초과이면 그 날도 OFF
+  {
+    const REST_VALS=new Set(['OFF','주','VAC','생휴','수면','병가','법','중']);
+    const manOvrRefO=state.manualOverrides||{};
+    const isLockedO=(id,d2)=>!!(manOvrRefO[id]&&manOvrRefO[id][d2]);
+    // 2회 반복 (연쇄 보정)
+    for(let pass=0;pass<2;pass++){
+      staff.forEach(s=>{
+        const id=s.id;
+        for(let d=1;d<numDays-1;d++){
+          const cur=sched[id][d];
+          // 현재 날이 OFF 계열인데
+          if(!REST_VALS.has(cur)) continue;
+          if(isLockedO(id,d)) continue;
+          // 앞뒤가 모두 근무(D/E/N)인 단독 휴무 패턴
+          const prevSh=sched[id][d-1];
+          const nextSh=sched[id][d+1];
+          const prevWork=prevSh==='D'||prevSh==='E'||prevSh==='N';
+          const nextWork=nextSh==='D'||nextSh==='E'||nextSh==='N';
+          if(!prevWork||!nextWork) continue;
+          if(isLockedO(id,d+1)) continue;
+          // 다음날 인원이 minStaff 초과이면 다음날 OFF로 전환
+          const nxtTarget=nextSh==='D'?minStaff.D:nextSh==='E'?minStaff.E:minStaff.N;
+          const nxtCnt=staff.filter(x=>sched[x.id][d+1]===nextSh).length;
+          if(nxtCnt>nxtTarget){
+            sched[id][d+1]='OFF';
+          }
+        }
+      });
+    }
+  }
+
+  // ── 최종 정리 ④: 단독 OFF 보정 후 인원 부족 재보충 ──
+  {
+    const manOvrRef4=state.manualOverrides||{};
+    const isLocked4=(id,d2)=>!!(manOvrRef4[id]&&manOvrRef4[id][d2]);
+    const isMR4=(id,d2)=>{
+      if(d2>0&&sched[id][d2-1]==='N') return true;
+      if(d2>1&&sched[id][d2-2]==='N'&&sched[id][d2-1]!=='D'&&sched[id][d2-1]!=='E') return true;
+      return false;
+    };
+    for(let d=0;d<numDays;d++){
+      const cnt4={D:0,E:0,N:0};
+      staff.forEach(s=>{ const sh=sched[s.id][d]; if(sh==='D'||sh==='E'||sh==='N') cnt4[sh]++; });
+      // D 부족 보충
+      if(cnt4.D<minStaff.D){
+        const need=minStaff.D-cnt4.D;
+        const cands=staff.filter(s=>{
+          if(sched[s.id][d]!=='OFF') return false;
+          if(isLocked4(s.id,d)||isMR4(s.id,d)) return false;
+          if(d>0&&sched[s.id][d-1]==='E') return false; // E→D 금지
+          if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='D')) return false;
+          return true;
+        }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
+        for(let i=0;i<need&&i<cands.length;i++) sched[cands[i].id][d]='D';
+      }
+      // E 부족 보충
+      const cnt4e={D:0,E:0,N:0};
+      staff.forEach(s=>{ const sh=sched[s.id][d]; if(sh==='D'||sh==='E'||sh==='N') cnt4e[sh]++; });
+      if(cnt4e.E<minStaff.E){
+        const need=minStaff.E-cnt4e.E;
+        const cands=staff.filter(s=>{
+          if(sched[s.id][d]!=='OFF') return false;
+          if(isLocked4(s.id,d)||isMR4(s.id,d)) return false;
+          if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='E')) return false;
+          return true;
+        }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
+        for(let i=0;i<need&&i<cands.length;i++) sched[cands[i].id][d]='E';
+      }
+      // N 부족 보충
+      const cnt4n={D:0,E:0,N:0};
+      staff.forEach(s=>{ const sh=sched[s.id][d]; if(sh==='D'||sh==='E'||sh==='N') cnt4n[sh]++; });
+      if(cnt4n.N<minStaff.N){
+        const need=minStaff.N-cnt4n.N;
+        const cands=staff.filter(s=>{
+          if(sched[s.id][d]!=='OFF') return false;
+          if(isLocked4(s.id,d)||isMR4(s.id,d)) return false;
+          const nCnt4=sched[s.id].filter(x=>x==='N').length;
+          if(nCnt4>=nMaxOf(s.id)) return false;
+          if(d+1<numDays&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E')) return false;
+          if(noOverlapIds.has(s.id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==s.id&&sched[x.id][d]==='N')) return false;
+          return true;
+        }).sort((a,b)=>(ps[b.id]?.offCount||0)-(ps[a.id]?.offCount||0));
+        for(let i=0;i<need&&i<cands.length;i++) sched[cands[i].id][d]='N';
       }
     }
   }
@@ -1808,6 +1918,21 @@ function checkScheduleViolations(sched){
       }
     });
   }
+
+  // ⑨ 최종 근무표 검사: E→D 패턴 위반
+  staff.forEach(s=>{
+    const id=s.id, shifts=sched[id]||[];
+    for(let d=1;d<numDays;d++){
+      if(shifts[d-1]==='E'&&shifts[d]==='D'){
+        viols.push({
+          level:'error',
+          rule:'이브닝→데이 위반 (E→D)',
+          msg:`${s.name} — ${dayLabel(d-1)} 이브닝 다음날(${dayLabel(d)}) 데이 배정`,
+          cause:'이브닝 근무 직후 데이 근무는 절대 불가합니다. 수동 조정이 필요합니다.'
+        });
+      }
+    }
+  });
 
   return viols;
 }
