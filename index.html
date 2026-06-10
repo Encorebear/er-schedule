@@ -34,6 +34,26 @@ header h1{font-size:16px;font-weight:700;white-space:nowrap}
 .btn-primary{background:#fff;color:#1d4ed8}.btn-danger{background:#fee2e2;color:#dc2626}
 .btn-success{background:#dcfce7;color:#16a34a}.btn-warn{background:#fef3c7;color:#d97706}
 
+/* ── 하단 네비게이션 (모바일) ── */
+.bottom-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:linear-gradient(135deg,#1e40af,#3b82f6);z-index:200;box-shadow:0 -2px 8px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom,0px)}
+.bottom-nav-inner{display:flex;height:56px}
+.bnav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border:none;background:transparent;color:rgba(255,255,255,.65);font-size:10px;font-family:inherit;cursor:pointer;gap:2px;padding:0;transition:.2s;-webkit-tap-highlight-color:transparent}
+.bnav-btn.active{color:#fff;background:rgba(255,255,255,.18)}
+.bnav-btn .bicon{font-size:20px;line-height:1}
+.bnav-btn .blabel{font-size:10px;font-weight:600}
+
+/* ── 모바일 오버라이드 ── */
+@media(max-width:768px){
+  .tab-nav{display:none}
+  header{padding:0 12px;gap:10px}
+  header h1{font-size:13px}
+  .header-right .hide-mobile{display:none!important}
+  .tab-content{padding:12px 12px 80px}
+  .bottom-nav{display:block}
+  body{padding-bottom:0}
+  .two-col{grid-template-columns:1fr!important}
+}
+
 /* ── LAYOUT ── */
 .tab-content{display:none;padding:16px;max-width:1600px;margin:0 auto}
 .tab-content.active{display:block}
@@ -308,13 +328,34 @@ header{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(10px,
     <button class="tab-btn" id="tab-btn-accounts" onclick="showTab('accounts')" style="display:none">🔐 계정 관리</button>
   </nav>
   <div class="header-right">
-    <span id="header-user" style="font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap"></span>
+    <span id="header-user" class="hide-mobile" style="font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap"></span>
     <span id="sync-indicator" title="Firebase 동기화 상태"></span>
-    <button class="btn-sm btn-primary" id="btn-save" onclick="saveState()">💾 저장</button>
-    <button class="btn-sm btn-warn" onclick="showPwModal()">👤 내 계정</button>
+    <button class="btn-sm btn-primary hide-mobile" id="btn-save" onclick="saveState()">💾 저장</button>
+    <button class="btn-sm btn-warn hide-mobile" onclick="showPwModal()">👤 내 계정</button>
     <button class="btn-sm btn-danger" onclick="doLogout()">로그아웃</button>
   </div>
 </header>
+
+<!-- ── 하단 네비게이션 (모바일 전용) ── -->
+<nav class="bottom-nav" id="bottom-nav">
+  <div class="bottom-nav-inner">
+    <button class="bnav-btn active" id="bnav-staff" onclick="showTab('staff')">
+      <span class="bicon">👥</span><span class="blabel">직원관리</span>
+    </button>
+    <button class="bnav-btn" id="bnav-period" onclick="showTab('period')">
+      <span class="bicon">📅</span><span class="blabel">기간설정</span>
+    </button>
+    <button class="bnav-btn" id="bnav-schedule" onclick="showTab('schedule')">
+      <span class="bicon">📋</span><span class="blabel">근무표</span>
+    </button>
+    <button class="bnav-btn" id="bnav-export" onclick="showTab('export')">
+      <span class="bicon">📤</span><span class="blabel">엑셀출력</span>
+    </button>
+    <button class="bnav-btn" id="bnav-accounts" onclick="showTab('accounts')" style="display:none">
+      <span class="bicon">🔐</span><span class="blabel">계정관리</span>
+    </button>
+  </div>
+</nav>
 
 <!-- ══ TAB 1: 직원 관리 ══════════════════════════════════════════════════ -->
 <div id="tab-staff" class="tab-content active">
@@ -683,14 +724,18 @@ function toast(msg, dur=2000){
 function showTab(name){
   document.querySelectorAll('.tab-content').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.bnav-btn').forEach(e=>e.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  const btnId='tab-btn-'+name;
-  const target=document.getElementById(btnId);
-  if(target) target.classList.add('active');
+  const topBtn=document.getElementById('tab-btn-'+name);
+  if(topBtn) topBtn.classList.add('active');
+  const botBtn=document.getElementById('bnav-'+name);
+  if(botBtn) botBtn.classList.add('active');
   if(name==='schedule') renderScheduleGrid();
   if(name==='period'){ updatePeriodSummary(); renderLeaveList(); updateLeaveStaffSelect(); renderHistoryList(); }
   if(name==='export') renderExportSummary();
   if(name==='accounts') renderUserMgmt();
+  // 모바일: 탭 전환 시 페이지 최상단으로 스크롤
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 function getDate(d){ return new Date(d+'T00:00:00'); }
 function addDays(dateStr,n){ const d=getDate(dateStr); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
@@ -1723,17 +1768,16 @@ function loginAs(user){
   const canEdit  = isAdmin || isEditor;   // 편집 가능 여부
   window._scheduleReadOnly = !canEdit;
 
-  // ── 탭 노출 제어 ──
-  // 직원관리: 관리자 + 편집자
-  document.getElementById('tab-btn-staff').style.display    = canEdit?'':'none';
-  // 기간설정: 관리자 + 편집자
-  document.getElementById('tab-btn-period').style.display   = canEdit?'':'none';
-  // 엑셀출력: 관리자 + 편집자
-  document.getElementById('tab-btn-export').style.display   = canEdit?'':'none';
-  // 계정관리: 관리자만
-  document.getElementById('tab-btn-accounts').style.display = isAdmin?'':'none';
+  // ── 탭 노출 제어 (상단 + 하단 네비 동기화) ──
+  const tabVis=(id,show)=>{
+    const el=document.getElementById(id); if(el) el.style.display=show?'':'none';
+  };
+  tabVis('tab-btn-staff',   canEdit); tabVis('bnav-staff',   canEdit);
+  tabVis('tab-btn-period',  canEdit); tabVis('bnav-period',  canEdit);
+  tabVis('tab-btn-export',  canEdit); tabVis('bnav-export',  canEdit);
+  tabVis('tab-btn-accounts',isAdmin); tabVis('bnav-accounts',isAdmin);
   // 저장 버튼: 관리자 + 편집자
-  document.getElementById('btn-save').style.display         = canEdit?'':'none';
+  document.getElementById('btn-save').style.display = canEdit?'':'none';
 
   // ── 근무표 탭 편집 버튼 제어 ──
   document.getElementById('btn-auto-schedule').style.display  = canEdit?'':'none';
