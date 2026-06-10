@@ -810,7 +810,8 @@ function renderStaffTable(){
   const tbody=document.getElementById('staff-tbody');
   document.getElementById('staff-count').textContent=state.staff.length;
   if(!state.staff.length){tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:24px">직원이 없어요</td></tr>';return;}
-  tbody.innerHTML=state.staff.map((s,i)=>`
+  const sorted=[...state.staff].sort((a,b)=>Number(a.group)-Number(b.group));
+  tbody.innerHTML=sorted.map((s,i)=>`
     <tr>
       <td style="color:#94a3b8;font-size:11px">${i+1}</td>
       <td style="font-weight:600">${s.name}</td>
@@ -917,7 +918,8 @@ function renderHolidays(){
 function updateLeaveStaffSelect(){
   const sel=document.getElementById('leave-staff');
   const cur=sel.value;
-  sel.innerHTML=state.staff.map(s=>
+  const sortedStaff=[...state.staff].sort((a,b)=>Number(a.group)-Number(b.group));
+  sel.innerHTML=sortedStaff.map(s=>
     `<option value="${s.id}" ${s.id===cur?'selected':''}>${s.name} (${s.group}그룹)</option>`
   ).join('');
 }
@@ -1217,7 +1219,8 @@ function clearSchedule(){
 //  SCHEDULE GRID RENDER
 // ═══════════════════════════════════════════════════════════════════
 function renderScheduleGrid(){
-  const {staff,period,schedule,minStaff} = state;
+  const {period,schedule,minStaff} = state;
+  const staff=[...state.staff].sort((a,b)=>Number(a.group)-Number(b.group));
   const numDays=period.days;
   const startDate=period.start;
   if(!staff.length){
