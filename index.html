@@ -1123,10 +1123,11 @@ function autoSchedule(){
       if((grpCntN[s.group]||0)>=capN) continue; // 그룹 상한
 
       // N 최소 2일 연속 보장
+      // nCommit=2로 설정: ⑦에서 1 감소 → 다음날 nCommit=1이 남아 committed 경로 실행 보장
       if(p.nStreak===0){
         const tmw=d+1<numDays?sched[id][d+1]:null;
         if(tmw!==null&&tmw!=='N') continue;
-        p.nCommit=1;
+        p.nCommit=2;
       }
 
       sched[id][d]='N'; assigned.add(id); cnt.N++;
@@ -1183,6 +1184,9 @@ function autoSchedule(){
     staff.forEach(s=>{
       const id=s.id, p=ps[id], sh=sched[id][d];
       if(sh==='N'){
+        // 새 N 시작이고 커밋 미설정인 경우(사전배정 N 포함) → 자동 커밋=2
+        // ⑦에서 1 감소 후 nCommit=1이 남아 다음날 committed 경로 보장
+        if(p.nStreak===0 && p.nCommit<2) p.nCommit=2;
         p.nStreak++; p.nCount++; p.workCount++;
         if(p.nCommit>0) p.nCommit--;
       } else if(sh==='D'||sh==='E'||sh==='중'){
@@ -1276,18 +1280,22 @@ function dayLabel(d){
   return `${fmtDate(date)}(${dow})`;
 }
 
+// ══ 근무 규칙 위반 검사 ══
+// ※ 스케줄러가 방지할 수 있는 위반은 발생시키지 않는 게 원칙.
+//    이 함수는 "사전 신청(leaves)이 직접 원인인 불가피한 충돌"만 보고합니다.
 function checkScheduleViolations(sched){
-  const {staff,period,leaves,minStaff}=state;
+  const {staff,period,leaves}=state;
   const numDays=period.days;
   const NO_OVERLAP_NAMES=new Set(['이경희','오선영','우영미']);
   const JUNIOR_NAMES=new Set(['이유진','이창성','백지선','정진우','김민아','장미선']);
   const N_MAX_OVERRIDE={'이경희':3,'오선영':4};
-  const N_PER_MIN=3, JUNIOR_SHIFT_MAX=3;
+  const JUNIOR_SHIFT_MAX=3;
   const noOverlapIds=new Set(staff.filter(s=>NO_OVERLAP_NAMES.has(s.name)).map(s=>s.id));
   const juniorIds=new Set(staff.filter(s=>JUNIOR_NAMES.has(s.name)).map(s=>s.id));
   const nMaxOf=id=>{ const s=staff.find(x=>x.id===id); return s?(N_MAX_OVERRIDE[s.name]??8):8; };
+  const REST_TYPES=new Set(['OFF','주','VAC','법','생휴','수면','병가']);
 
-  // 사전 신청된 leaves 인덱스 맵
+  // 사전 신청 맵 (user가 미리 입력한 leaves)
   const fixedMap={};
   staff.forEach(s=>{
     fixedMap[s.id]={};
@@ -1297,10 +1305,12 @@ function checkScheduleViolations(sched){
     });
   });
 
-  const REST_TYPES=new Set(['OFF','주','VAC','법','생휴','수면','병가']);
+  const isFixed=(id,d)=>fixedMap[id][d]!==undefined;
+  const fixedType=(id,d)=>fixedMap[id][d];
+
   const viols=[];
 
-  // ① N 연속성 (1일 단독 체크)
+  // ① 사전 신청 N이 앞뒤 모두 막혀 1일 단독이 불가피한 경우
   staff.forEach(s=>{
     const id=s.id, shifts=sched[id]||[];
     let d=0;
@@ -1308,122 +1318,92 @@ function checkScheduleViolations(sched){
       if(shifts[d]==='N'){
         let streak=1;
         while(d+streak<numDays&&shifts[d+streak]==='N') streak++;
-        if(streak===1){
-          // 사전신청이 원인인지 확인
-          const reasons=[];
-          if(d>0&&fixedMap[id][d-1]) reasons.push(`전날 "${fixedMap[id][d-1]}" 사전신청`);
-          if(d+1<numDays&&fixedMap[id][d+1]) reasons.push(`다음날 "${fixedMap[id][d+1]}" 사전신청`);
-          else if(d+1>=numDays) reasons.push('기간 마지막 날');
-          viols.push({
-            level:'warn',
-            rule:'N 연속 미달',
-            msg:`${s.name} — ${dayLabel(d)} 나이트 1일 단독 배정 (최소 2연속 원칙)`,
-            cause: reasons.length?`원인: ${reasons.join(', ')}`:'사전신청 없음 — 스케줄러 조정 필요'
-          });
+        if(streak===1 && isFixed(id,d) && fixedType(id,d)==='N'){
+          // 사전 신청 N이 단독인 경우 — 앞뒤가 사전 신청으로 막혔는지 확인
+          const prevBlocked=d===0||(isFixed(id,d-1)&&fixedType(id,d-1)!=='N');
+          const nextBlocked=d+1>=numDays||(isFixed(id,d+1)&&fixedType(id,d+1)!=='N');
+          if(prevBlocked||nextBlocked){
+            const reasons=[];
+            if(d===0) reasons.push('기간 첫날');
+            else if(isFixed(id,d-1)) reasons.push(`전날 "${fixedType(id,d-1)}" 사전신청`);
+            if(d+1>=numDays) reasons.push('기간 마지막 날');
+            else if(isFixed(id,d+1)) reasons.push(`다음날 "${fixedType(id,d+1)}" 사전신청`);
+            viols.push({
+              level:'warn',
+              rule:'N 1일 단독 (사전신청 충돌)',
+              msg:`${s.name} — ${dayLabel(d)} 나이트 신청이 앞뒤 신청과 충돌해 1일 단독`,
+              cause:`원인: ${reasons.join(', ')} → 나이트 연속 2일 배정이 불가능합니다.`
+            });
+          }
         }
         d+=streak;
       } else d++;
     }
   });
 
-  // ② N 개인 최대 초과
+  // ② 사전 신청 N 자체가 개인 상한 초과
   staff.forEach(s=>{
-    const id=s.id, shifts=sched[id]||[];
-    const nCnt=shifts.filter(sh=>sh==='N').length;
+    const id=s.id;
+    const preN=Object.values(fixedMap[id]).filter(t=>t==='N').length;
     const maxN=nMaxOf(id);
-    if(nCnt>maxN){
+    if(preN>maxN){
       viols.push({
         level:'error',
-        rule:'N 개인 상한 초과',
-        msg:`${s.name} — 나이트 ${nCnt}개 배정 (상한 ${maxN}개 초과)`,
-        cause:`사전 N 신청 또는 N 부족자 보충 후처리에 의해 초과됨`
+        rule:'N 사전신청 상한 초과',
+        msg:`${s.name} — 나이트 사전신청 ${preN}개 (개인 상한 ${maxN}개 초과)`,
+        cause:`사전신청 자체가 상한을 초과합니다. ${maxN}개 이하로 줄여주세요.`
       });
     }
   });
 
-  // ③ N 개인 최소 미달
-  staff.forEach(s=>{
-    const id=s.id, shifts=sched[id]||[];
-    const nCnt=shifts.filter(sh=>sh==='N').length;
-    const fixedRestCount=Object.values(fixedMap[id]).filter(t=>REST_TYPES.has(t)).length;
-    const workable=numDays-fixedRestCount;
-    if(nCnt<N_PER_MIN&&workable>=N_PER_MIN){
-      viols.push({
-        level:'warn',
-        rule:'N 최소 미달',
-        msg:`${s.name} — 나이트 ${nCnt}개 (최소 ${N_PER_MIN}개 미달)`,
-        cause: fixedRestCount>0
-          ?`사전 휴가/오프 신청 ${fixedRestCount}일로 배정 가능 일수가 부족했을 수 있음`
-          :'연속 N 조건·그룹캡 제약으로 인해 추가 배정 불가했음'
-      });
-    }
-  });
-
-  // ④ 이경희·오선영·우영미 겹침 금지
+  // ③ 겹침 금지 직원 2명 이상이 같은 날 같은 근무를 사전신청
   for(let d=0;d<numDays;d++){
     const noOvStaff=staff.filter(s=>noOverlapIds.has(s.id));
     ['D','E','N'].forEach(sh=>{
-      const onShift=noOvStaff.filter(s=>(sched[s.id]||[])[d]===sh);
-      if(onShift.length>=2){
-        const fixedOnShift=onShift.filter(s=>fixedMap[s.id][d]===sh);
+      const fixedConflict=noOvStaff.filter(s=>fixedMap[s.id][d]===sh);
+      if(fixedConflict.length>=2){
         viols.push({
           level:'error',
-          rule:'겹침 금지 직원 동일 근무',
-          msg:`${dayLabel(d)} [${sh}] — ${onShift.map(s=>s.name).join('·')} 동시 배정`,
-          cause: fixedOnShift.length>=2
-            ?`${fixedOnShift.map(s=>s.name).join('·')} 둘 다 이날 ${sh} 사전 신청 → 불가피`
-            :fixedOnShift.length===1
-            ?`${fixedOnShift[0].name} 사전 ${sh} 신청으로 인해 다른 직원 조정 필요`
-            :'스케줄러 로직 검토 필요'
+          rule:'겹침 금지 직원 사전신청 충돌',
+          msg:`${dayLabel(d)} [${sh}] — ${fixedConflict.map(s=>s.name).join('·')} 동시 사전신청`,
+          cause:`두 분 모두 이날 ${sh}를 사전신청하셨습니다. 한 분의 신청을 변경해야 합니다.`
         });
       }
     });
   }
 
-  // ⑤ 신입 동일 근무 3명 초과
+  // ④ 신입 4명 이상이 같은 날 같은 근무를 사전신청
   for(let d=0;d<numDays;d++){
     const jrStaff=staff.filter(s=>juniorIds.has(s.id));
     ['D','E','N'].forEach(sh=>{
-      const onShift=jrStaff.filter(s=>(sched[s.id]||[])[d]===sh);
-      if(onShift.length>JUNIOR_SHIFT_MAX){
-        const fixedHere=onShift.filter(s=>fixedMap[s.id][d]===sh);
+      const fixedJr=jrStaff.filter(s=>fixedMap[s.id][d]===sh);
+      if(fixedJr.length>JUNIOR_SHIFT_MAX){
         viols.push({
           level:'warn',
-          rule:'신입 동일 근무 초과',
-          msg:`${dayLabel(d)} [${sh}] — 신입 ${onShift.length}명 (최대 ${JUNIOR_SHIFT_MAX}명)`,
-          cause: fixedHere.length
-            ?`사전 ${sh} 신청자: ${fixedHere.map(s=>s.name).join('·')}`
-            :'배정 가능한 경력 직원 부족'
+          rule:'신입 사전신청 집중',
+          msg:`${dayLabel(d)} [${sh}] — 신입 사전신청 ${fixedJr.length}명 (최대 ${JUNIOR_SHIFT_MAX}명)`,
+          cause:`${fixedJr.map(s=>s.name).join('·')}가 동시 사전신청. 1명 이상 조정해주세요.`
         });
       }
     });
   }
 
-  // ⑥ 주휴 사이 쉬는 날 없음
+  // ⑤ 사전 신청된 쉬는 날이 너무 많아 개인 N 3개 배정이 수학적으로 불가능한 경우
   staff.forEach(s=>{
-    const id=s.id, shifts=sched[id]||[];
-    let lastJuhuDay=-99, hadRest=true;
-    for(let d=0;d<numDays;d++){
-      const sh=shifts[d];
-      if(sh==='주'){
-        if(lastJuhuDay>=0&&!hadRest){
-          const fixedWork=[];
-          for(let x=lastJuhuDay+1;x<d;x++){
-            if(['D','E','N'].includes(shifts[x])&&fixedMap[id][x]) fixedWork.push(`${dayLabel(x)} ${shifts[x]}`);
-          }
-          viols.push({
-            level:'warn',
-            rule:'주휴 사이 휴무 없음',
-            msg:`${s.name} — ${dayLabel(lastJuhuDay)}~${dayLabel(d)} 주휴 사이 쉬는 날 없음`,
-            cause: fixedWork.length
-              ?`사전 근무신청(${fixedWork.join(', ')})으로 쉬는 날 배정 불가`
-              :'스케줄러 조정 필요'
-          });
-        }
-        lastJuhuDay=d; hadRest=false;
-      } else if(REST_TYPES.has(sh)||!sh){
-        hadRest=true;
-      }
+    const id=s.id;
+    const preRestDays=Object.values(fixedMap[id]).filter(t=>REST_TYPES.has(t)).length;
+    const preWorkDays=Object.values(fixedMap[id]).filter(t=>['D','E','N'].includes(t)).length;
+    const freeDays=numDays-preRestDays-preWorkDays;
+    const preN=Object.values(fixedMap[id]).filter(t=>t==='N').length;
+    // N 2연속 최소 1쌍 + 남은 N은 2연속 → 3N 최소 필요 가용일: 4일 (2+2)
+    const needFree=Math.max(0,(3-preN)*2); // 사전N 제외하고 필요한 free 일수
+    if(preN+(Math.floor(freeDays/2))< 3 && freeDays<needFree){
+      viols.push({
+        level:'warn',
+        rule:'N 최소 배정 불가 (사전신청 과다)',
+        msg:`${s.name} — 사전 휴가/오프 ${preRestDays}일로 나이트 3개 배정이 어렵습니다`,
+        cause:`가용 일수 ${freeDays}일로 나이트 ${3-preN}개 추가 배정이 어렵습니다. 오프 신청을 줄여주세요.`
+      });
     }
   });
 
