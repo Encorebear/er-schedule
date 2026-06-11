@@ -1286,62 +1286,80 @@ function autoSchedule(){
     });
   }
 
-  // ── 후처리: N 최소 5개 보장 — d+2/d+3 잉여 체크 포함 ──
-  const dayCntN=new Array(numDays).fill(0);
-  const dayCntD_pre=new Array(numDays).fill(0); // d+2/d+3 여유 체크용
-  const dayCntE_pre=new Array(numDays).fill(0);
-  staff.forEach(s=>{ for(let d=0;d<numDays;d++){
-    if(sched[s.id][d]==='N') dayCntN[d]++;
-    if(sched[s.id][d]==='D') dayCntD_pre[d]++;
-    if(sched[s.id][d]==='E') dayCntE_pre[d]++;
-  }});
+  // ── 후처리: N 최소 보장 (강화판) — N_DAY_MAX 상한, OFF→N 패스 추가 ──
+  {
+    const dayCntN=new Array(numDays).fill(0);
+    const dayCntD_pre=new Array(numDays).fill(0);
+    const dayCntE_pre=new Array(numDays).fill(0);
+    staff.forEach(s=>{ for(let d=0;d<numDays;d++){
+      if(sched[s.id][d]==='N') dayCntN[d]++;
+      if(sched[s.id][d]==='D') dayCntD_pre[d]++;
+      if(sched[s.id][d]==='E') dayCntE_pre[d]++;
+    }});
+    const _LS_N=new Set(['VAC','주','생휴','수면','병가','법','중']);
+    // 의무휴무 체크 (isMR 정의 전이라 인라인)
+    const _mrN=(id,d2)=>{
+      if(d2>0&&sched[id][d2-1]==='N') return true;
+      if(d2>1&&sched[id][d2-2]==='N'&&sched[id][d2-1]!=='D'&&sched[id][d2-1]!=='E') return true;
+      return false;
+    };
+    const _lkN=(id,d2)=>!!(manOvr[id]&&manOvr[id][d2]);
+    const _noN=(id,d2)=>noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d2]==='N');
+    // 공통: N 이후 d+2/d+3 D/E → OFF (잉여 있을 때만)
+    const _afterN=(id,d)=>{
+      for(const dd of [d+2,d+3]){
+        if(dd<numDays&&['D','E'].includes(sched[id][dd])&&!_lkN(id,dd)){
+          const sh=sched[id][dd];
+          const cnt=sh==='D'?dayCntD_pre[dd]:dayCntE_pre[dd];
+          if(cnt>(sh==='D'?minStaff.D:minStaff.E)){
+            if(sh==='D') dayCntD_pre[dd]--; else dayCntE_pre[dd]--;
+            sched[id][dd]='OFF';
+          }
+        }
+      }
+    };
 
-  staff.forEach(s=>{
-    const id=s.id;
-    const nTarget=Math.min(N_PER_MIN, nMaxOf(id));
-    let nCnt=sched[id].filter(sh=>sh==='N').length;
-    if(nCnt>=nTarget) return;
-    for(let d=0;d<numDays-1&&nCnt<nTarget;d++){
-      if(['D','E'].includes(sched[id][d])&&['D','E'].includes(sched[id][d+1])){
-        if(nCnt>=nMaxOf(id)) break;
-        if(dayCntN[d]>=minStaff.N||dayCntN[d+1]>=minStaff.N) continue;
-        // ★ d/d+1 날 자체: D/E를 N으로 교체 시 그 날 D/E가 최소치 이하로 떨어지면 skip
-        {
-          const _sh0=sched[id][d], _sh1=sched[id][d+1];
-          const _cnt0=(_sh0==='D'?dayCntD_pre:dayCntE_pre)[d];
-          if(_cnt0<=(_sh0==='D'?minStaff.D:minStaff.E)) continue;
-          const _cnt1=(_sh1==='D'?dayCntD_pre:dayCntE_pre)[d+1];
-          if(_cnt1<=(_sh1==='D'?minStaff.D:minStaff.E)) continue;
-        }
-        // ★ d+2: 이 사람의 D/E가 N 이후 강제 제거되므로 잉여 있어야 함
-        if(d+2<numDays&&(sched[id][d+2]==='D'||sched[id][d+2]==='E')){
-          const sh2=sched[id][d+2];
-          const cnt2=(sh2==='D'?dayCntD_pre:dayCntE_pre)[d+2];
-          const tgt2=sh2==='D'?minStaff.D:minStaff.E;
-          if(cnt2<=tgt2) continue; // 제거 시 부족 → 이 쌍 건너뜀
-        }
-        // ★ d+3: 동일 체크
-        if(d+3<numDays&&(sched[id][d+3]==='D'||sched[id][d+3]==='E')){
-          const sh3=sched[id][d+3];
-          const cnt3=(sh3==='D'?dayCntD_pre:dayCntE_pre)[d+3];
-          const tgt3=sh3==='D'?minStaff.D:minStaff.E;
-          if(cnt3<=tgt3) continue;
-        }
-        // 교체 실행 + 카운트 갱신
-        const sh0=sched[id][d], sh1=sched[id][d+1];
-        if(sh0==='D') dayCntD_pre[d]--; else dayCntE_pre[d]--;
-        if(sh1==='D') dayCntD_pre[d+1]--; else dayCntE_pre[d+1]--;
+    staff.forEach(s=>{
+      const id=s.id;
+      const nTarget=Math.min(N_PER_MIN, nMaxOf(id));
+      let nCnt=sched[id].filter(sh=>sh==='N').length;
+      if(nCnt>=nTarget) return;
+
+      // Pass 1: D/E 연속 쌍 → N N (상한 N_DAY_MAX, D/E 잉여 필수)
+      for(let d=0;d<numDays-1&&nCnt<nTarget;d++){
+        const s0=sched[id][d], s1=sched[id][d+1];
+        if(!['D','E'].includes(s0)||!['D','E'].includes(s1)) continue;
+        if(dayCntN[d]>=N_DAY_MAX||dayCntN[d+1]>=N_DAY_MAX) continue;
+        if(_lkN(id,d)||_lkN(id,d+1)) continue;
+        if(_noN(id,d)||_noN(id,d+1)) continue;
+        const sh0cnt=s0==='D'?dayCntD_pre[d]:dayCntE_pre[d];
+        if(sh0cnt<=(s0==='D'?minStaff.D:minStaff.E)) continue;
+        const sh1cnt=s1==='D'?dayCntD_pre[d+1]:dayCntE_pre[d+1];
+        if(sh1cnt<=(s1==='D'?minStaff.D:minStaff.E)) continue;
+        if(s0==='D') dayCntD_pre[d]--; else dayCntE_pre[d]--;
+        if(s1==='D') dayCntD_pre[d+1]--; else dayCntE_pre[d+1]--;
         sched[id][d]='N'; sched[id][d+1]='N'; nCnt+=2;
         dayCntN[d]++; dayCntN[d+1]++;
-        // d+2/d+3 카운트도 선제 차감 (이후 강제 제거 반영)
-        if(d+2<numDays&&sched[id][d+2]==='D') dayCntD_pre[d+2]--;
-        else if(d+2<numDays&&sched[id][d+2]==='E') dayCntE_pre[d+2]--;
-        if(d+3<numDays&&sched[id][d+3]==='D') dayCntD_pre[d+3]--;
-        else if(d+3<numDays&&sched[id][d+3]==='E') dayCntE_pre[d+3]--;
+        _afterN(id,d+1);
         d++;
       }
-    }
-  });
+
+      if(nCnt>=nTarget) return;
+
+      // Pass 2: OFF 연속 쌍 → N N (상한 N_DAY_MAX, 의무휴무·락·noOverlap 체크)
+      for(let d=0;d<numDays-1&&nCnt<nTarget;d++){
+        if(sched[id][d]!=='OFF'||sched[id][d+1]!=='OFF') continue;
+        if(dayCntN[d]>=N_DAY_MAX||dayCntN[d+1]>=N_DAY_MAX) continue;
+        if(_lkN(id,d)||_lkN(id,d+1)) continue;
+        if(_mrN(id,d)) continue;
+        if(_noN(id,d)||_noN(id,d+1)) continue;
+        sched[id][d]='N'; sched[id][d+1]='N'; nCnt+=2;
+        dayCntN[d]++; dayCntN[d+1]++;
+        _afterN(id,d+1);
+        d++;
+      }
+    });
+  }
 
   // ── 후처리: OFF 균등화 ──
   // 사전신청/법정 고정 휴가(VAC·생휴·수면·병가·법·주·중)는 건드리지 않음
