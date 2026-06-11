@@ -1826,6 +1826,7 @@ function autoSchedule(){
       if(_bestSchedResult){ staff.forEach(s=>{ sched[s.id]=[..._bestSchedResult[s.id]]; }); }
       const _LS=new Set(['VAC','주','생휴','수면','병가','법','중']);
       const _cf=(id,d2)=>!isLkd(id,d2)&&!isMR(id,d2)&&!_LS.has(sched[id][d2]);
+      const _noOv=(id,d2,sh)=>noOverlapIds.has(id)&&staff.some(x=>noOverlapIds.has(x.id)&&x.id!==id&&sched[x.id][d2]===sh);
       for(let _np=0;_np<2;_np++){
         for(let d=0;d<numDays;d++){
           // ① N 먼저
@@ -1834,6 +1835,7 @@ function autoSchedule(){
             if(ns>0){
               for(const s of staff){
                 if(ns<=0)break; if(sched[s.id][d]!=='OFF')continue; if(!_cf(s.id,d))continue;
+                if(_noOv(s.id,d,'N'))continue;
                 sched[s.id][d]='N';
                 if(d+1<numDays&&!isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E'))sched[s.id][d+1]='OFF';
                 if(d+2<numDays&&!isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E'))sched[s.id][d+2]='OFF';
@@ -1842,6 +1844,7 @@ function autoSchedule(){
               for(const s of [...staff].sort((a,b)=>sched[a.id].filter(x=>x==='N').length-sched[b.id].filter(x=>x==='N').length)){
                 if(ns<=0)break; const sh=sched[s.id][d]; if(sh!=='D'&&sh!=='E')continue; if(isLkd(s.id,d))continue;
                 if(staff.filter(x=>sched[x.id][d]===sh).length<=minStaff[sh])continue;
+                if(_noOv(s.id,d,'N'))continue;
                 sched[s.id][d]='N';
                 if(d+1<numDays&&!isLkd(s.id,d+1)&&(sched[s.id][d+1]==='D'||sched[s.id][d+1]==='E'))sched[s.id][d+1]='OFF';
                 if(d+2<numDays&&!isLkd(s.id,d+2)&&(sched[s.id][d+2]==='D'||sched[s.id][d+2]==='E'))sched[s.id][d+2]='OFF';
@@ -1856,6 +1859,7 @@ function autoSchedule(){
               for(const s of staff){
                 if(ds<=0)break; if(sched[s.id][d]!=='OFF')continue; if(!_cf(s.id,d))continue;
                 if(d>0&&sched[s.id][d-1]==='E')continue;
+                if(_noOv(s.id,d,'D'))continue;
                 sched[s.id][d]='D'; ds--;
               }
               if(ds>0){
@@ -1863,6 +1867,7 @@ function autoSchedule(){
                   if(ds<=0)break; if(sched[s.id][d]!=='E')continue; if(isLkd(s.id,d))continue;
                   if(d>0&&sched[s.id][d-1]==='E')continue;
                   if(staff.filter(x=>sched[x.id][d]==='E').length<=minStaff.E)continue;
+                  if(_noOv(s.id,d,'D'))continue;
                   sched[s.id][d]='D'; ds--;
                 }
               }
@@ -1874,6 +1879,7 @@ function autoSchedule(){
             if(es>0){
               for(const s of staff){
                 if(es<=0)break; if(sched[s.id][d]!=='OFF')continue; if(!_cf(s.id,d))continue;
+                if(_noOv(s.id,d,'E'))continue;
                 sched[s.id][d]='E';
                 if(d+1<numDays&&!isLkd(s.id,d+1)&&sched[s.id][d+1]==='D')sched[s.id][d+1]='OFF';
                 es--;
@@ -1883,6 +1889,20 @@ function autoSchedule(){
         }
       }
       enforceRules(); fillOnce();
+      // 핵 배정 후 noOverlap 위반 강제 해소
+      {
+        const _noOvArr=staff.filter(s=>noOverlapIds.has(s.id));
+        for(let _d2=0;_d2<numDays;_d2++){
+          ['D','E','N'].forEach(sh=>{
+            const _conf=_noOvArr.filter(s=>sched[s.id][_d2]===sh);
+            if(_conf.length>=2){
+              // 근무 횟수 적은 사람을 우선 보존 (많이 일한 사람 제거)
+              _conf.sort((a,b)=>sched[b.id].filter(x=>['D','E','N'].includes(x)).length-sched[a.id].filter(x=>['D','E','N'].includes(x)).length);
+              for(let _ci=0;_ci<_conf.length-1;_ci++) sched[_conf[_ci].id][_d2]='OFF';
+            }
+          });
+        }
+      }
       _bestSchedResult={}; staff.forEach(s=>{ _bestSchedResult[s.id]=[...sched[s.id]]; });
     }
   }
